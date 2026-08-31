@@ -1,0 +1,511 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SpectRoom</string>
+
+    <string name="tab_messages">Messages</string>
+    <string name="tab_matches">Matches</string>
+    <string name="tab_home">Discover</string>
+    <string name="tab_profile">Profile</string>
+    <string name="tab_settings">Settings</string>
+
+    <string name="onboarding_title">SpectRoom</string>
+    <string name="onboarding_subtitle">A calmer way to meet people nearby — built for genuine connection.</string>
+    <string name="onboarding_get_started">Get Started</string>
+    <string name="onboarding_intro_title">Welcome to SpectRoom</string>
+    <string name="onboarding_intro_title_line1">Welcome to</string>
+    <string name="onboarding_intro_title_line2">SpectRoom</string>
+    <string name="onboarding_intro_description">Connect with people who appreciate your unique perspective at your own pace.</string>
+    <string name="onboarding_intro_notice_lead">🎁 Free during Beta:</string>
+    <string name="onboarding_intro_notice_body">SpectRoom is currently in early access and completely free to use. As an early member, you’re helping us build a better community! Standard features will remain free, though we will introduce optional paid tiers in the future</string>
+    <string name="onboarding_step_1">- Step 1 -</string>
+    <string name="onboarding_step_2">- Step 2 -</string>
+    <string name="onboarding_step_3">- Step 3 -</string>
+    <string name="onboarding_welcome_title">Customize Your Profile</string>
+    <string name="onboarding_welcome_description">Add interests and sensory preferences to your profile. It helps others see what matters to you and how to make interaction easy.</string>
+    <string name="onboarding_match_title">Discover Connections</string>
+    <string name="onboarding_match_description">Browse up to 10 profiles a day at your own speed. Tap or swipe right if you feel a connection, or pass with no awkwardness.</string>
+    <string name="onboarding_communication_title">Chat Anytime</string>
+    <string name="onboarding_communication_description">Connect through direct messaging with built-in tools designed to make starting and pacing conversations comfortable.</string>
+    <string name="onboarding_previous">Previous</string>
+    <string name="onboarding_next">Next</string>
+    <string name="onboarding_dont_show_again">Don\'t show this again</string>
+
+    <string name="auth_welcome_back">Welcome back</string>
+    <string name="auth_create_account">Create your account</string>
+    <string name="auth_sign_in">Sign In</string>
+    <string name="auth_sign_up">Sign Up</string>
+    <string name="auth_full_name">Full Name</string>
+    <string name="auth_email">Email</string>
+    <string name="auth_password">Password</string>
+    <string name="auth_forgot_password">Forgot Password?</string>
+    <string name="auth_reset_password_sent">Password reset email sent to %1$s</string>
+    <string name="auth_reset_password_error">Couldn\'t send reset email. Please try again.</string>
+    <string name="auth_have_account">Already have an account?</string>
+    <string name="auth_no_account">Don\'t have an account?</string>
+    <string name="auth_error_account_banned">This account has been permanently banned.</string>
+    <string name="auth_error_account_frozen">Your account is temporarily frozen.\n\nTry to login after %1$s.</string>
+    <string name="auth_error_account_deleted">This account has been deleted.</string>
+
+    <string name="settings_title">Settings</string>
+    <string name="settings_section_preferences">Preferences</string>
+    <string name="settings_section_privacy_safety">Privacy &amp; Safety</string>
+    <string name="settings_section_account_data">Account &amp; Data</string>
+    <string name="settings_section_support_about">Support &amp; About</string>
+    <string name="settings_dark_mode">Dark Mode</string>
+    <string name="settings_dark_mode_description">Enable dark mode</string>
+    <string name="settings_light_mode">Light Mode</string>
+    <string name="settings_distance">Discover distance</string>
+    <string name="settings_language">Language</string>
+    <string name="settings_language_description">Select app language</string>
+    <string name="language_selection_title">Select Language</string>
+    <string name="settings_notifications_description">Enable notifications</string>
+    <string name="settings_sound_description">Enable in-app sounds</string>
+    <string name="settings_privacy_settings">Privacy Settings</string>
+    <string name="settings_privacy_safety_description">Control your privacy settings</string>
+    <string name="settings_blocked_users">Blocked profiles</string>
+    <string name="settings_blocked_users_count">Blocked Profiles (%d)</string>
+    <string name="settings_blocked_subtitle">See all blocked profiles</string>
+    <string name="settings_blocked_users_modal_title">Blocked profiles</string>
+    <string name="settings_blocked_users_empty">No blocked profiles</string>
+    <string name="settings_blocked_users_empty_description">When you block someone, they can\'t see your profile or send you messages. Blocked profiles will appear here. To block someone, open their profile and tap Block at the top.</string>
+    <string name="settings_blocked_users_since">Blocked %1$s</string>
+    <string name="settings_blocked_users_no_date">Blocked</string>
+    <string name="settings_blocked_users_unblock">Unblock</string>
+    <string name="settings_blocked_users_unblock_confirm_title">Unblock %1$s?</string>
+    <string name="settings_blocked_users_unblock_confirm_message">This will allow %1$s to see your profile and any previous communication</string>
+    <string name="settings_reported_profiles">Reported profiles</string>
+    <string name="settings_reported_profiles_count">Reported Profiles (%d)</string>
+    <string name="settings_help_description">Get help and contact support</string>
+    <string name="settings_about_description">App version and information</string>
+
+    <string name="about_title">About</string>
+    <string name="about_spectroom_title">About SpectRoom</string>
+    <string name="about_intro_1">SpectRoom is a dating and connection app thoughtfully designed for autistic adults and the broader neurodivergent community.</string>
+    <string name="about_intro_2">We believe that everyone deserves a space where communication styles are understood, sensory needs are respected, and individuality is celebrated - without judgment, pressure, or misunderstanding.</string>
+    <string name="about_focus_title">SpectRoom focuses on clarity, safety, and comfort.</string>
+    <string name="about_focus_body">Our design considers the unique needs of neurodivergent users, such as reduced sensory overload, structured communication, clear boundaries, and personalized support settings. Whether you\'re seeking friendship, dating, or deeper relationships, SpectRoom offers a calm and supportive environment where you can express yourself at your own pace.</string>
+    <string name="about_mission_title">Our mission is simple:</string>
+    <string name="about_mission_body">Create a meaningful, inclusive space where neurodivergent people can connect authentically - and feel safe while doing so.</string>
+    <string name="about_values_title">SpectRoom is built with respect, empathy, and accessibility at its core.</string>
+    <string name="about_values_body">You\'re welcome here.</string>
+    <string name="about_abashelari_title">About Abashelari Productions</string>
+    <string name="about_abashelari_1">Abashelari Productions is an independent technology and creative development studio based in Stockholm.</string>
+    <string name="about_abashelari_2">We specialize in crafting thoughtful digital experiences with a focus on accessibility, education, and everyday empowerment. Our work spans mobile apps, interactive tools, and content designed to make life easier, more inclusive, and more enjoyable for users of all backgrounds.</string>
+    <string name="about_studio_title">Founded on a passion for innovation and human-centered design, Abashelari Productions develops products that combine technical reliability with emotional intelligence.</string>
+    <string name="about_studio_body">We believe in building software that respects users, simplifies complex challenges, and brings real value to people\'s lives.</string>
+    <string name="about_closing">From children\'s educational games to community-driven platforms like SpectRoom, our goal is to create meaningful digital products that leave a positive impact - one app at a time.</string>
+
+    <string name="privacy_safety_title">Privacy &amp; Safety</string>
+    <string name="privacy_safety_intro">Your privacy, comfort, and safety are our highest priorities. Our app is designed to support neurodivergent individuals in a respectful, secure, and transparent way. The following principles explain how we protect your information and how you can stay safe while using our platform.</string>
+    <string name="privacy_safety_section_1_title">1. Your Data, Your Control</string>
+    <string name="privacy_safety_section_1_body">• You choose what personal information to share in your profile.\n\n• Sensitive information-such as accessibility needs, support levels, health-related details, or communication preferences-is always optional.\n\n• You can edit or remove your information at any time in your profile settings.\n\n• You can delete your account at any time, and all associated data will be permanently removed from our servers within a reasonable timeframe.</string>
+    <string name="privacy_safety_section_2_title">2. How We Use Your Information</string>
+    <string name="privacy_safety_section_2_body">We use the information you provide to:\n\n• Create your profile\n• Match you with compatible users\n• Improve your in-app experience\n• Maintain a safe, supportive community\n\nWe never sell your data to third parties.\n\nWe only share your data with trusted service providers who help us operate the app (e.g., secure servers, analytics). These providers follow strict privacy and security standards.</string>
+    <string name="privacy_safety_section_3_title">3. Protecting Your Safety</string>
+    <string name="privacy_safety_section_3_body">We use several measures to keep you safe, including:\n\n• Profile moderation and automated detection of harmful behavior\n• Reporting tools available on every profile and message\n• Optional account verification\n• Internal review of reports and timely action against violations\n\nWe do not tolerate harassment, discrimination, hate speech, or exploitation of any kind.</string>
+    <string name="privacy_safety_section_4_title">4. Sensitive Information</string>
+    <string name="privacy_safety_section_4_body">Because our community includes neurodivergent users and people with accessibility needs, you may choose to share personal details.\n\nIf you do, please remember:\n\n• Sharing is always voluntary\n• You control who can view sensitive sections of your profile\n• Sensitive details are never used for advertising or sold to third parties\n• Use caution when sharing personal information with others.</string>
+    <string name="privacy_safety_section_5_title">5. Communication &amp; Boundaries</string>
+    <string name="privacy_safety_section_5_body">Always communicate at your own pace and comfort level.\n\nWe encourage:\n\n• Clear communication\n• Respect for different communication styles\n• Patience and understanding\n\nIf someone makes you uncomfortable, you can:\n\n• Block the user\n• Report their profile\n• Limit who can contact you in your preferences</string>
+    <string name="privacy_safety_section_6_title">6. Meeting in Person</string>
+    <string name="privacy_safety_section_6_body">If you decide to meet someone:\n\n• Use a public place\n• Tell a friend or family member where you\'re going\n• Consider using the app\'s check-in feature (if available)\n• Trust your instincts-if something feels wrong, leave immediately\n\nYour safety always comes first.</string>
+    <string name="privacy_safety_section_7_title">7. Security Measures</string>
+    <string name="privacy_safety_section_7_body">We use industry-standard security technologies to protect your information, including:\n\n• Encrypted data transmission\n• Secure password storage\n• Fraud detection systems\n• Continuous security monitoring\n\nIf a data or security issue is ever detected, we will notify you promptly and transparently.</string>
+    <string name="privacy_safety_section_8_title">8. Your Responsibility</string>
+    <string name="privacy_safety_section_8_body">While we work hard to create a safe environment, you also play an important role.\n\nPlease:\n\n• Keep personal details (address, financial info, work details) private\n• Be cautious about sharing photos or videos\n• Report any suspicious or harmful behavior\n\nTogether, we can maintain a respectful and safe community.</string>
+    <string name="privacy_safety_section_9_title">9. Contact &amp; Support</string>
+    <string name="privacy_safety_section_9_body">If you have any questions about privacy, need to report an issue, or want support:\n\n• In-app Support → Help &amp; Safety\n• Or email us at: spectroom.support@gmail.com\n\nWe are here to help and respond as quickly as possible.</string>
+
+    <string name="settings_sign_out_subtitle">Sign out your account</string>
+    <string name="settings_delete_account_subtitle">Permanently delete your account</string>
+    <string name="settings_reported_profiles_subtitle">See all reported profiles</string>
+    <string name="settings_reported_profiles_modal_title">Reported profiles</string>
+    <string name="settings_reported_profiles_empty">No reported profiles</string>
+    <string name="settings_reported_profiles_empty_description">When you report someone, they will appear here. To report someone, open their profile, tap Block, then choose Block &amp; Report.</string>
+    <string name="settings_reported_profiles_since">Reported %1$s</string>
+    <string name="settings_reported_profiles_no_date">Reported</string>
+    <string name="settings_reported_profiles_detail_title">Report details</string>
+    <string name="settings_reported_profiles_detail_headline">%1$s was reported on %2$s</string>
+    <string name="settings_reported_profiles_detail_headline_no_date">%1$s was reported</string>
+    <string name="settings_reported_profiles_detail_category">Report reason</string>
+    <string name="settings_reported_profiles_detail_details">Report Details</string>
+    <string name="settings_reported_profiles_detail_status">Status</string>
+    <string name="settings_reported_profiles_detail_bio">Bio at time of report</string>
+    <string name="settings_reported_profiles_status_pending">Pending</string>
+    <string name="settings_reported_profiles_status_reviewed">Reviewed</string>
+    <string name="settings_reported_profiles_status_dismissed">Dismissed</string>
+    <string name="settings_reported_profiles_status_actioned">Actioned</string>
+    <string name="settings_mfa">SMS security (MFA)</string>
+    <string name="settings_mfa_subtitle">Add phone verification</string>
+    <string name="settings_notifications">Notifications</string>
+    <string name="settings_sound">Sounds</string>
+    <string name="settings_privacy">Privacy &amp; safety</string>
+    <string name="settings_help">Help &amp; Support</string>
+    <string name="settings_about">About SpectRoom</string>
+    <string name="settings_export_messages">Export Messages</string>
+    <string name="settings_export_messages_description">Export last 6 months messages</string>
+    <string name="settings_export_messages_file_title">SpectRoom Messages Export</string>
+    <string name="settings_export_messages_exported_at">Exported: %1$s</string>
+    <string name="settings_export_messages_account">Account: %1$s</string>
+    <string name="settings_export_messages_conversation_with">Conversation with %1$s</string>
+    <string name="settings_export_messages_you">You</string>
+    <string name="settings_export_messages_voice">[Voice Attachment]</string>
+    <string name="settings_export_messages_photo">[Photo Attachment]</string>
+    <string name="settings_export_messages_video">[Video Attachment]</string>
+    <string name="settings_export_messages_empty">You don\'t have any messages to export yet.</string>
+    <string name="settings_export_messages_error">Couldn\'t export your messages. Please try again.</string>
+    <string name="settings_sign_out">Sign Out</string>
+    <string name="settings_delete_account">Delete Account</string>
+    <string name="settings_delete_account_confirm_title">Delete account</string>
+    <string name="settings_delete_account_confirm_message">Are you sure? Your account will be deleted!</string>
+    <string name="settings_delete_account_yes">Yes</string>
+    <string name="settings_delete_account_password_message">In order to delete your account, enter your password</string>
+    <string name="settings_delete_account_password_placeholder">Password</string>
+    <string name="settings_delete_account_success">Your account was deleted</string>
+    <string name="settings_cancel">Cancel</string>
+    <string name="common_close">Close</string>
+    <string name="settings_done">Done</string>
+
+    <string name="messages_title">Messages</string>
+    <string name="messages_tap_to_see_profile">Tap to see profile</string>
+    <string name="messages_loading_conversation">Loading conversation...</string>
+    <string name="messages_no_messages_found">You matched with %1$s!</string>
+    <string name="messages_no_messages_found_body">Say hello to break the ice, or pick a suggestion from </string>
+    <string name="matches_pre_message_button_short">Quick msg</string>
+    <string name="messages_loading">Loading messages...</string>
+    <string name="messages_empty_has_matches_title">No active chats yet</string>
+    <string name="messages_empty_has_matches_description">You have matches waiting! Pick a match and say hello.</string>
+    <string name="messages_empty_has_matches_button">View Matches</string>
+    <string name="messages_empty_no_matches_description">Connect with new people nearby to start chatting.</string>
+    <string name="messages_empty_no_matches_button">Explore Profiles</string>
+    <string name="messages_search_clear">Clear search</string>
+    <string name="messages_empty">No messages yet</string>
+    <string name="messages_blocked_alert_title">%1$s has blocked you.</string>
+    <string name="messages_blocked_alert_detail">You can still view previous messages, but you cannot send new ones.</string>
+    <string name="messages_blocked_alert_dont_show_again">Don\'t show this again</string>
+    <string name="messages_composer_blocked">Messaging is unavailable</string>
+    <string name="messages_new_message">New Message</string>
+    <string name="messages_new_message_from">from %1$s</string>
+    <string name="message_notification_push_title">SpectRoom message!</string>
+    <string name="message_notification_push_body">%1$s: %1$s</string>
+    <string name="match_notification_title">It\'s a match! 💕</string>
+    <string name="match_notification_body">You and %1$s like each other!</string>
+    <string name="messages_unread_badge">%1$d unread</string>
+    <string name="messages_open_message">Open</string>
+    <string name="messages_later">Later</string>
+    <string name="messages_voice_long_press_tip_title">Voice message</string>
+    <string name="messages_voice_long_press_tip_message">Long tap for recording a message</string>
+    <string name="messages_voice_long_press_tip_got_it">Got it</string>
+    <string name="messages_search_placeholder">Search chats</string>
+    <string name="messages_search_no_results">There are no results</string>
+    <string name="messages_search_no_results_hint">Try a different name or a word from a message</string>
+    <string name="messages_date_today">Today</string>
+    <string name="messages_date_yesterday">Yesterday</string>
+    <string name="messages_read_more">Read more</string>
+    <string name="messages_voice_ready">Message ready</string>
+    <string name="messages_voice_preview_duration">%1$s sec</string>
+    <string name="messages_voice_preview_play">Play</string>
+    <string name="messages_send">Send</string>
+    <string name="messages_sending">Sending</string>
+    <string name="messages_save_photo">Save</string>
+    <string name="messages_photo_saved">Photo saved to gallery</string>
+    <string name="messages_photo_save_error">Couldn\'t save photo</string>
+    <string name="notifications_channel_name">Messages</string>
+    <string name="discover_energy_title">My energy level</string>
+    <string name="discover_energy_subtitle">Let matches know how social you feel today</string>
+    <string name="matches_title">Matches</string>
+    <string name="matches_empty">No matches yet</string>
+    <string name="matches_empty_description">Start exploring profiles to find your next match.</string>
+    <string name="matches_explore_profiles">Explore Profiles</string>
+    <string name="matches_loading">Loading matches...</string>
+    <string name="profile_edit_completion">Profile %d%% complete</string>
+    <string name="profile_my_title">My Profile</string>
+    <string name="profile_edit">Edit</string>
+    <string name="profile_my_age">My Age</string>
+    <string name="profile_years_old">years old</string>
+    <string name="profile_my_location">My Location</string>
+    <string name="profile_location_not_specified">Not specified</string>
+    <string name="profile_location_privacy_notice">Your address is never shared</string>
+    <string name="address_search_title">Search Address</string>
+    <string name="address_search_placeholder">Search for an address in Sweden</string>
+    <string name="address_search_sweden_only_notice">SpectRoom is currently available in Sweden only.</string>
+    <string name="address_search_searching">Searching…</string>
+    <string name="address_search_no_results_sweden">No addresses found in Sweden</string>
+    <string name="address_search_use_address">Use this address</string>
+    <string name="address_search_outside_sweden">Please select a location within Sweden.</string>
+    <string name="profile_my_preferences">My Preferences</string>
+    <string name="profile_my_preferred_age">My Preferred Age: %1$s To %2$s</string>
+    <string name="profile_preferred_age_range">%1$d to %2$d</string>
+    <string name="profile_im_a">I\'m a</string>
+    <string name="profile_interested_in_label">interested in</string>
+    <string name="profile_looking_for_label">Looking for</string>
+    <string name="profile_no_preferences">No preferences set</string>
+    <string name="profile_no_interests">No interests added yet</string>
+    <string name="profile_no_photos">No photos added yet</string>
+    <string name="profile_interested_anyone">anyone</string>
+    <string name="profile_no_one">no one</string>
+    <string name="profile_nothing_specific">Nothing specific</string>
+    <string name="profile_edit_title">Edit Profile</string>
+    <string name="profile_edit_profile_photo">My Profile Photo</string>
+    <string name="profile_edit_add_photo">Add photo</string>
+    <string name="profile_edit_add">Add</string>
+    <string name="profile_edit_save">Save</string>
+    <string name="profile_edit_saving">Saving…</string>
+    <string name="profile_edit_photos_hint">Min 2 photos, Max 5 photos</string>
+    <string name="profile_my_energy_level">My Energy Level Today</string>
+    <string name="profile_about_me">About Me</string>
+    <string name="profile_no_bio">No bio available</string>
+    <string name="profile_no_photo">No profile photo</string>
+    <string name="profile_my_photos">My Photos</string>
+    <string name="profile_my_interests">My Interests</string>
+    <string name="profile_my_lifestyle_title">My Lifestyle</string>
+    <string name="profile_my_body_type">My Body Type</string>
+    <string name="profile_my_ideal_first_date">My Ideal First Date</string>
+    <string name="profile_my_sensory_preferences">My Sensory Preferences</string>
+    <string name="profile_looking_for_details_title">Looking for:</string>
+    <string name="profile_edit_gender">Gender</string>
+    <string name="profile_edit_interested_in">I\'m Interested In</string>
+    <string name="profile_edit_looking_for">I\'m Looking For</string>
+    <string name="profile_edit_date_of_birth">My Date of Birth</string>
+    <string name="profile_edit_my_age">My Age: %1$s</string>
+    <string name="profile_edit_name">My Name</string>
+    <string name="profile_edit_email">My Email</string>
+    <string name="profile_email_privacy_notice">Your email address is never shared</string>
+    <string name="profile_edit_location_placeholder">Select your location in Sweden</string>
+    <string name="profile_edit_about_me">About Me</string>
+    <string name="profile_edit_i_am">I am</string>
+    <string name="profile_edit_preferred_age">Preferred age</string>
+    <string name="profile_edit_character_counter_min">Min: %1$s Max: 500</string>
+    <string name="profile_edit_character_counter_max">Max: %1$s</string>
+    <string name="profile_edit_gender_man">Man</string>
+    <string name="profile_edit_gender_woman">Woman</string>
+    <string name="profile_edit_gender_nonbinary">Non-binary</string>
+    <string name="search_match_prefix">You have </string>
+    <string name="search_match_percent_part">%d%%</string>
+    <string name="search_match_label"> match</string>
+    <string name="search_match_suffix"> with %1$s</string>
+    <string name="search_match_sentence">You have a %1$d%% match with %2$s</string>
+    <string name="search_match_details_title">Match with %1$s</string>
+    <string name="search_match_details_percent">%d%% match</string>
+    <string name="search_match_details_interests">Shared interests</string>
+    <string name="search_match_details_interests_none">No shared interests yet</string>
+    <string name="search_match_details_sensory">Shared sensory preferences</string>
+    <string name="search_match_details_lifestyle">Shared lifestyle</string>
+    <string name="search_match_details_ideal_first_date">Shared ideal first date</string>
+    <string name="search_match_details_looking_for">Shared looking for</string>
+    <string name="search_match_details_age">Age</string>
+    <string name="search_match_details_age_same">You are the same age as %1$s</string>
+    <string name="search_match_details_age_younger">You are %d years younger than %1$s</string>
+    <string name="search_match_details_age_older">You are %d years older than %1$s</string>
+    <string name="common_got_it">Got it</string>
+    <string name="profile_complete_welcome_title">Welcome to SpectRoom!</string>
+    <string name="profile_complete_welcome_message">Complete your profile to help others understand how you like to connect.</string>
+    <string name="profile_complete_welcome_continue">Let\'s Get Started</string>
+    <string name="profile_block_confirm_title">Block %1$s?</string>
+    <string name="profile_block_confirm_message">They will no longer be able to see your profile or message you. They won\'t be notified.</string>
+    <string name="profile_block_confirm_action">Block</string>
+    <string name="profile_block_confirm_block_and_report">Block &amp; Report</string>
+    <string name="profile_block_success_title">%1$s has been blocked</string>
+    <string name="matches_message_button">Message</string>
+    <string name="matches_message_label">Message</string>
+    <string name="matches_new_message">New Message</string>
+    <string name="matches_new_message_to">to %1$s</string>
+    <string name="messages_send_message">Send Message</string>
+    <string name="messages_conversation_blocked">Blocked</string>
+    <string name="auth_phone_placeholder">Phone number</string>
+    <string name="mfa_country_picker_title">Select country</string>
+    <string name="matches_search_placeholder">Search matches</string>
+    <string name="matches_search_clear">Clear search</string>
+    <string name="matches_search_no_results_hint">Try a different name, interest, or profile detail</string>
+    <string name="matches_pre_message_button">Quick message</string>
+    <string name="matches_pre_message_title">Quick Message</string>
+    <string name="matches_pre_message_subtitle">Choose a pre-written message</string>
+    <string name="quick_msg_category_low_pressure">Low Pressure</string>
+    <string name="quick_msg_category_casual">Casual</string>
+    <string name="quick_msg_category_questions">Questions</string>
+    <string-array name="quick_msg_low">
+        <item>Hi! No rush at all to reply.</item>
+        <item>Hello! Happy to connect whenever you have time.</item>
+        <item>Hi. Just wanted to say hello, keep it simple. 😊</item>
+        <item>Hey there! Hope you\'re having a calm day. 🌿</item>
+        <item>Hi! Nice match. Feel free to reply whenever.</item>
+        <item>Hello! No big conversation needed, just saying hi.</item>
+        <item>Hi! Hope your week is off to a gentle start. ✨</item>
+        <item>Hey! 👋 Take your time responding.</item>
+    </string-array>
+    <string-array name="quick_msg_casual">
+        <item>Hey! Great to match with you.</item>
+        <item>Hi there! How\'s your day going? 😊</item>
+        <item>Hello! I really liked your profile.</item>
+        <item>Hey! Hope you\'re having a good week.</item>
+        <item>Hi! Happy to connect with you. ✨</item>
+        <item>Hey! How\'s your week treatin\' you?</item>
+        <item>Hello! 👋 Nice to meet you.</item>
+        <item>Hi there! Hope you\'re enjoying your day. ☕</item>
+    </string-array>
+    <string-array name="quick_msg_question">
+        <item>Hi! What caught your eye on my profile?</item>
+        <item>Hey! What\'s your favorite way to unwind? 🌿</item>
+        <item>Hello! What are you looking for on here?</item>
+        <item>Hi! What\'s something fun you did recently? ✨</item>
+        <item>Hey! Any good music or podcast recommendations? 🎧</item>
+        <item>Hello! What\'s your ideal low-key weekend?</item>
+        <item>Hi! What\'s your favorite comfort food? 🍕</item>
+        <item>Hey! Have any fun plans coming up? 😊</item>
+    </string-array>
+    <string name="discover_daily_limit_title">That\'s all for today</string>
+    <string name="discover_daily_limit_body">You\'ve used your 10 daily swipes. Come back tomorrow.</string>
+    <string name="discover_daily_limit_why">Why?</string>
+    <string name="discover_daily_limit_why_title">Why can\'t I see more profiles?</string>
+    <string name="discover_daily_limit_why_message">In SpectRoom, we believe that taking the time to really see someone matters more than endless swiping. A gentle daily limit helps you stay present, give matches a real chance, and come back tomorrow with fresh energy - so connection can grow with intention, not rush.</string>
+    <string name="discover_second_thoughts">Second thoughts — review today\'s passes</string>
+    <string name="discover_second_thoughts_banner">Reviewing today\'s passes</string>
+    <string name="discover_distance_title">Search distance</string>
+    <string name="discover_distance_subtitle">How far should we look for people?</string>
+    <string name="settings_distance_5km">5 km</string>
+    <string name="settings_distance_10km">10 km</string>
+    <string name="settings_distance_20km">20 km</string>
+    <string name="settings_distance_50km">50 km</string>
+    <string name="settings_distance_unlimited">Unlimited</string>
+    <string name="discover_empty">No more profiles nearby</string>
+    <string name="discover_empty_hint">Try expanding your distance radius.</string>
+    <string name="discover_incomplete_title">Finish your profile</string>
+    <string name="discover_incomplete_body">Complete your profile to start discovering people nearby.</string>
+    <string name="discover_incomplete_cta">Finish My Profile</string>
+    <string name="matches_energy_today">%1$s today</string>
+    <string name="mfa_sign_out_start_over">Sign out &amp; start over</string>
+    <string name="match_its_a_match">It\'s a match!</string>
+    <string name="match_liked_each_other">You and %1$s liked each other</string>
+    <string name="match_send_message">Send a message</string>
+    <string name="match_maybe_later">Maybe later</string>
+
+    <string name="photo_share_warning_subtitle">Sharing photos is a great way to connect, but your safety comes first.</string>
+    <string name="photo_share_warning_bullets_intro">Make sure your photos don\'t show:</string>
+    <string name="photo_share_warning_bullet_intimate">Private or intimate details</string>
+    <string name="photo_share_warning_bullet_address">Street signs or house numbers</string>
+    <string name="photo_share_warning_bullet_workplace">Workplaces or badges</string>
+    <string name="photo_share_warning_dont_show_again">I understand</string>
+    <string name="photo_share_warning_continue">Continue</string>
+
+    <string name="admin_warning_popup_title">Notice: Community Guidelines</string>
+    <string name="admin_warning_popup_accept">I Understand</string>
+    <string name="admin_warning_default_message">Your account was recently reported for content or behavior that violates our guidelines. Please keep interactions respectful to ensure SpectRoom remains safe for everyone. Repeated violations may result in account suspension.</string>
+    <string name="admin_freeze_popup_title">Account Temporarily Suspended</string>
+    <string name="admin_freeze_popup_accept">I Understand</string>
+    <string name="admin_freeze_popup_message">Your account has been temporarily frozen for %d hours due to a violation of our community guidelines.
+
+Full access will be automatically restored on %1$s.</string>
+    <string name="admin_freeze_popup_contact_support">Contact Support</string>
+    <string name="admin_ban_popup_title">Account Permanently Banned</string>
+    <string name="admin_ban_popup_message">Your SpectRoom account has been permanently banned for violating our Community Guidelines.
+
+You will no longer be able to access this account. If you believe this was done in error, you can submit an appeal to support.</string>
+    <string name="admin_ban_popup_accept">I understand</string>
+    <string name="admin_deleted_popup_title">Account Deleted</string>
+    <string name="admin_deleted_popup_message">Your SpectRoom account has been permanently deleted.
+
+You will no longer be able to access this account. If you believe this was done in error, you can submit an appeal to support.</string>
+    <string name="admin_deleted_popup_accept">I understand</string>
+    <string name="admin_ban_lifted_popup_title">Account ban lifted</string>
+    <string name="admin_ban_lifted_popup_message">Your SpectRoom account ban has been lifted.
+
+You can use SpectRoom again.</string>
+    <string name="admin_ban_lifted_popup_accept">I understand</string>
+    <string name="admin_freeze_lifted_popup_title">Account freeze lifted</string>
+    <string name="admin_freeze_lifted_popup_message">Your SpectRoom account freeze has been lifted.\n\nYou can use SpectRoom again.</string>
+    <string name="admin_freeze_lifted_popup_accept">I understand</string>
+    <string name="admin_lift_ban">Lift ban</string>
+    <string name="admin_lift_ban_subtitle">Restore access and notify the user.</string>
+    <string name="admin_lift_freeze">Lift freeze</string>
+    <string name="admin_lift_freeze_subtitle">Clear the temporary suspension and notify the user.</string>
+
+    <string name="support_nav_title">Help &amp; Support</string>
+    <string name="support_title">We\'d love to hear from you!</string>
+    <string name="support_subtitle">Select a topic and send us a message</string>
+    <string name="support_topic_label">Topic</string>
+    <string name="support_topic_safety">Safety</string>
+    <string name="support_topic_bug">Bug</string>
+    <string name="support_topic_feedback">Feedback</string>
+    <string name="support_topic_account_freeze">Account freeze</string>
+    <string name="support_topic_account_ban">Account ban</string>
+    <string name="support_topic_account_deleted">Account deleted</string>
+    <string name="support_topic_other">Other</string>
+    <string name="support_message_label">Message</string>
+    <string name="support_message_placeholder">Tell us a bit more...</string>
+    <string name="support_message_min_chars">Min 20 characters</string>
+    <string name="support_button_send">Send Message</string>
+    <string name="support_button_sent">Message Sent ✓</string>
+    <string name="support_or">OR</string>
+    <string name="support_email_label">Support Email</string>
+
+    <string name="admin_section_title">Admin</string>
+    <string name="admin_console_title">Admin console</string>
+    <string name="admin_console_subtitle">Review reports and restrict accounts</string>
+    <string name="admin_reports_title">Admin reports</string>
+    <string name="admin_reports_empty">No reports</string>
+    <string name="admin_reports_empty_description">There are no reports in this filter.</string>
+    <string name="admin_reports_filter_pending">Pending</string>
+    <string name="admin_reports_filter_all">All</string>
+    <string name="admin_reports_filter_actioned">Resolved</string>
+    <string name="admin_reports_action_error_title">Action failed</string>
+    <string name="admin_reports_action_dismiss">Dismiss report</string>
+    <string name="admin_reports_action_dismiss_subtitle">Mark as dismissed. No action against the reported user.</string>
+    <string name="admin_reports_action_warn">Issue warning</string>
+    <string name="admin_reports_action_warn_subtitle">Send an in-app warning and mark as actioned.</string>
+    <string name="admin_reports_action_freeze">Temporary freeze</string>
+    <string name="admin_reports_action_ban">Permanent ban</string>
+    <string name="admin_reports_action_ban_subtitle">Revoke access, end their session, and hide their profile.</string>
+    <string name="admin_reports_freeze_title">Freeze duration</string>
+    <string name="admin_reports_freeze_24h">24 hours</string>
+    <string name="admin_reports_freeze_48h">48 hours</string>
+    <string name="admin_reports_freeze_72h">72 hours</string>
+    <string name="admin_reports_ban_confirm_message">Permanently ban %1$s? This cannot be undone from this screen.</string>
+    <string name="admin_all_profiles_title">All profiles</string>
+    <string name="admin_all_profiles_search_placeholder">Search by name or email</string>
+    <string name="admin_all_profiles_empty">No profiles found</string>
+    <string name="admin_all_profiles_empty_description">There are no users to display yet.</string>
+    <string name="admin_all_profiles_status_online">Online</string>
+    <string name="admin_all_profiles_status_offline">Offline</string>
+    <string name="admin_all_profiles_status_banned">Banned</string>
+    <string name="admin_all_profiles_status_frozen">Frozen</string>
+    <string name="admin_all_profiles_status_deleted">Deleted</string>
+    <string name="admin_all_profiles_restrict_title">Restrict account</string>
+    <string name="admin_all_profiles_restrict_success">Action completed.</string>
+
+    <string name="common_message">Message</string>
+    <string name="common_cancel">Cancel</string>
+    <string name="common_send">Send</string>
+    <string name="common_delete">Delete</string>
+    <string name="common_recording">Recording…</string>
+    <string name="common_ok">OK</string>
+
+    <string name="mfa_email_title">Verify your email</string>
+    <string name="mfa_email_subtitle">We sent a verification link to %1$s. Open it, then continue.</string>
+    <string name="mfa_email_fallback">your email</string>
+    <string name="mfa_email_send">Resend verification email</string>
+    <string name="mfa_email_check">I\'ve verified my email</string>
+    <string name="mfa_enroll_title">Secure your account</string>
+    <string name="mfa_enroll_subtitle">Add a Sweden mobile number for SMS verification.</string>
+    <string name="mfa_phone_missing_title">Add your phone</string>
+    <string name="mfa_phone_missing_subtitle">We need a mobile number to send your verification code.</string>
+    <string name="mfa_edit_number_title">Edit phone number</string>
+    <string name="mfa_edit_number_subtitle">Update your number, then we\'ll send a new code.</string>
+    <string name="mfa_edit_number">Edit number</string>
+    <string name="mfa_save_phone">Save phone</string>
+    <string name="mfa_save_and_resend">Save &amp; resend code</string>
+    <string name="mfa_code_sent_to">Code sent to %1$s</string>
+    <string name="mfa_sending_code">Sending verification code…</string>
+    <string name="mfa_rate_limited_title">Too many attempts</string>
+    <string name="mfa_rate_limited_subtitle">SMS verification is temporarily limited.</string>
+    <string name="mfa_rate_limited_body">Please wait a few minutes, then try again. Unusual activity can temporarily block SMS requests.</string>
+    <string name="mfa_signin_title">Verify it\'s you</string>
+    <string name="mfa_signin_subtitle">Enter the code sent to %1$s</string>
+    <string name="mfa_phone_label">Phone number</string>
+    <string name="mfa_send_code">Send code</string>
+    <string name="mfa_sms_code">SMS code</string>
+    <string name="mfa_enable">Enable MFA</string>
+    <string name="mfa_verify">Verify</string>
+    <string name="mfa_resend">Resend code</string>
+    <string name="discover_online_now">Online</string>
+    <string name="discover_offline">Offline</string>
+</resources>

@@ -1,0 +1,15 @@
+package com.example.spectroom
+
+import android.app.Application
+import com.example.spectroom.data.local.AppPrefsStore
+import com.google.firebase.FirebaseApp
+import org.maplibre.android.MapLibre
+
+class SpectRoomApplication : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        MapLibre.getInstance(this)
+        FirebaseApp.initializeApp(this)
+        AppPrefsStore(this).applyStoredLocale()
+    }
+}

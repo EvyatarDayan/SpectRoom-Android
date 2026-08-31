@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "83359339695",
+    "project_id": "spectroom-553a0",
+    "storage_bucket": "spectroom-553a0.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:83359339695:android:d28317183b11bda353305a",
+        "android_client_info": {
+          "package_name": "com.example.spectroom"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "83359339695-5udpdmnve57brrj0dqhb3do98p614mjk.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBL_Jp5ef2v-aK2jrhNugg5wPmUkE5uJSU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "83359339695-5udpdmnve57brrj0dqhb3do98p614mjk.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "83359339695-9eio3d6aj8v8b11mv3gmaqs94l54i1gr.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "Evyatar.SpectRoom"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
