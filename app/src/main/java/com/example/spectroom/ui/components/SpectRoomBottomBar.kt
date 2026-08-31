@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -33,13 +34,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.example.spectroom.R
 import com.example.spectroom.ui.navigation.MainTab
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
+import com.example.spectroom.ui.theme.PassRed
 import com.example.spectroom.ui.theme.TabSelected
 
 private val BarTopCorner = 15.dp
@@ -186,21 +191,7 @@ private fun BottomTabItem(
                 modifier = Modifier.size(20.dp),
             )
             if (badgeCount > 0) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .offset(x = 6.dp, y = (-6).dp)
-                        .size(16.dp)
-                        .background(TabSelected, CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = if (badgeCount > 9) "9+" else badgeCount.toString(),
-                        color = Color.White,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
+                TabBadge(count = badgeCount)
             }
         }
         Text(
@@ -208,6 +199,31 @@ private fun BottomTabItem(
             color = tint,
             fontSize = 11.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+        )
+    }
+}
+
+@Composable
+private fun BoxScope.TabBadge(count: Int) {
+    val label = if (count > 9) "9+" else count.toString()
+    Box(
+        modifier = Modifier
+            .align(Alignment.TopEnd)
+            .offset(x = 6.dp, y = (-6).dp)
+            .size(18.dp)
+            .background(PassRed, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = Color.White,
+            style = TextStyle(
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                lineHeight = 10.sp,
+                textAlign = TextAlign.Center,
+                platformStyle = PlatformTextStyle(includeFontPadding = false),
+            ),
         )
     }
 }

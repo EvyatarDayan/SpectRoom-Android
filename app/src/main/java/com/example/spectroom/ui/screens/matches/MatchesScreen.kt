@@ -31,8 +31,11 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,9 +67,15 @@ import com.example.spectroom.ui.theme.TabSelected
 
 private val ListPadding = 16.dp
 private val RowSpacing = 14.dp
+private val SearchContentSpacing = 10.dp
 private val TabMenuReserve = TabBarBodyHeight
-/** Reserves the same vertical space the title used to occupy so content position stays fixed. */
-private val MatchesTitleBarReserve = 48.dp
+private val MatchesTitleTopPadding = 12.dp
+private val MatchesTitleLineHeight = 40.dp
+private val MatchesSearchTopGap = 4.dp
+private val MatchesTitleBarReserve =
+    MatchesTitleTopPadding + MatchesTitleLineHeight + MatchesSearchTopGap
+private val SearchBarCorner = 12.dp
+private val CardCorner = 16.dp
 
 @Composable
 fun MatchesScreen(
@@ -95,7 +104,9 @@ fun MatchesScreen(
             .background(colors.background),
     ) {
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding(),
         ) {
             Spacer(modifier = Modifier.height(MatchesTitleBarReserve))
 
@@ -105,7 +116,7 @@ fun MatchesScreen(
                     onQueryChange = { query = it },
                     modifier = Modifier
                         .padding(horizontal = ListPadding)
-                        .padding(top = 4.dp, bottom = 10.dp),
+                        .padding(bottom = SearchContentSpacing),
                 )
             }
 
@@ -121,7 +132,7 @@ fun MatchesScreen(
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
                             verticalArrangement = Arrangement.spacedBy(RowSpacing),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                            contentPadding = PaddingValues(
                                 start = ListPadding,
                                 end = ListPadding,
                                 top = 8.dp,
@@ -152,7 +163,7 @@ fun MatchesScreen(
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(top = 12.dp, bottom = 4.dp),
+                .padding(top = MatchesTitleTopPadding, bottom = MatchesSearchTopGap),
             contentAlignment = Alignment.Center,
         ) {
             Text(
@@ -215,8 +226,8 @@ private fun MatchesSearchBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(4.dp, RoundedCornerShape(12.dp), ambientColor = Color.Black.copy(0.08f))
-            .clip(RoundedCornerShape(12.dp))
+            .shadow(4.dp, RoundedCornerShape(SearchBarCorner), ambientColor = Color.Black.copy(0.08f))
+            .clip(RoundedCornerShape(SearchBarCorner))
             .background(colors.card)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -228,25 +239,32 @@ private fun MatchesSearchBar(
             tint = colors.secondaryText,
             modifier = Modifier.size(18.dp),
         )
-        TextField(
+        BasicTextField(
             value = query,
             onValueChange = onQueryChange,
-            modifier = Modifier.weight(1f),
-            placeholder = {
-                Text(
-                    stringResource(R.string.matches_search_placeholder),
-                    color = colors.secondaryText,
-                )
-            },
-            singleLine = true,
-            colors = TextFieldDefaults.colors(
-                focusedContainerColor = Color.Transparent,
-                unfocusedContainerColor = Color.Transparent,
-                disabledContainerColor = Color.Transparent,
-                focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent,
-                cursorColor = TabSelected,
+            modifier = Modifier
+                .weight(1f)
+                .defaultMinSize(minHeight = 20.dp),
+            textStyle = LocalTextStyle.current.copy(
+                fontSize = 15.sp,
+                lineHeight = 20.sp,
+                color = colors.text,
             ),
+            singleLine = true,
+            cursorBrush = SolidColor(TabSelected),
+            decorationBox = { innerTextField ->
+                Box(contentAlignment = Alignment.CenterStart) {
+                    if (query.isEmpty()) {
+                        Text(
+                            text = stringResource(R.string.matches_search_placeholder),
+                            color = colors.secondaryText,
+                            fontSize = 15.sp,
+                            lineHeight = 20.sp,
+                        )
+                    }
+                    innerTextField()
+                }
+            },
         )
         if (query.isNotEmpty()) {
             Icon(
@@ -408,7 +426,7 @@ private fun MatchGridCard(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(CardCorner))
             .background(colors.card),
     ) {
         Row(
@@ -485,31 +503,34 @@ private fun MatchGridCard(
                 .height(photoSide)
                 .clickable(onClick = onTap),
         ) {
-            Column(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
+                contentAlignment = Alignment.Center,
             ) {
-                Text(
-                    text = "$firstName, ${profile.age}",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 22.sp,
-                    color = colors.text,
-                    textAlign = TextAlign.Center,
-                    maxLines = 2,
-                )
-                if (showDistance) {
-                    Spacer(modifier = Modifier.height(4.dp))
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     Text(
-                        text = distance,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 15.sp,
-                        color = colors.secondaryText,
+                        text = "$firstName, ${profile.age}",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 22.sp,
+                        color = colors.text,
                         textAlign = TextAlign.Center,
                         maxLines = 2,
                     )
+                    if (showDistance) {
+                        Text(
+                            text = distance,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 15.sp,
+                            color = colors.secondaryText,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
+                        )
+                    }
                 }
             }
             Box(

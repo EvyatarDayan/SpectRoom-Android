@@ -45,10 +45,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -231,19 +228,11 @@ fun UserProfileModal(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = buildAnnotatedString {
-                                append(stringResource(R.string.search_match_prefix))
-                                withStyle(
-                                    SpanStyle(
-                                        color = if (percentage > 49) Color(0xFF4CAF50) else DistanceAccent,
-                                        fontWeight = FontWeight.Bold,
-                                    ),
-                                ) {
-                                    append(formatSpacedMatchPercent(percentage))
-                                }
-                                append(stringResource(R.string.search_match_label))
-                                append(stringResource(R.string.search_match_suffix, firstName))
-                            },
+                            text = buildMatchSentence(
+                                percentage = percentage,
+                                firstName = firstName,
+                                percentColor = if (percentage > 49) Color(0xFF4CAF50) else DistanceAccent,
+                            ),
                             color = colors.text,
                             fontSize = 14.sp,
                         )

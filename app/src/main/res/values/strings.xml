@@ -280,11 +280,7 @@
     <string name="profile_edit_gender_man">Man</string>
     <string name="profile_edit_gender_woman">Woman</string>
     <string name="profile_edit_gender_nonbinary">Non-binary</string>
-    <string name="search_match_prefix">You have </string>
-    <string name="search_match_percent_part">%d%%</string>
-    <string name="search_match_label"> match</string>
-    <string name="search_match_suffix"> with %1$s</string>
-    <string name="search_match_sentence">You have a %1$d%% match with %2$s</string>
+    <string name="search_match_sentence">You have %1$d%% match with %2$s</string>
     <string name="search_match_details_title">Match with %1$s</string>
     <string name="search_match_details_percent">%d%% match</string>
     <string name="search_match_details_interests">Shared interests</string>

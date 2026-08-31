@@ -63,7 +63,7 @@ fun MatchDetailsOverlay(
             Text(
                 text = stringResource(
                     R.string.search_match_details_percent,
-                    formatSpacedMatchPercent(percentage),
+                    percentage,
                 ),
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 18.sp,

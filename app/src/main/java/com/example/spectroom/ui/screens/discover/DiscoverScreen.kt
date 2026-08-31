@@ -47,11 +47,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -538,15 +535,11 @@ private fun ProfileCardContent(profile: ProfileCard) {
     val firstName = profile.name.substringBefore(' ').ifBlank { profile.name }
     val photoUrl = profile.imageURL ?: profile.photos.firstOrNull()
     val matchColor = if (profile.matchPercentage > 49) LikeGreen else colors.secondaryText
-    val matchPercentText = formatSpacedMatchPercent(profile.matchPercentage)
-    val matchSentence = buildAnnotatedString {
-        append(stringResource(R.string.search_match_prefix))
-        withStyle(SpanStyle(color = matchColor, fontWeight = FontWeight.SemiBold)) {
-            append(matchPercentText)
-        }
-        append(stringResource(R.string.search_match_label))
-        append(stringResource(R.string.search_match_suffix, firstName))
-    }
+    val matchSentence = buildMatchSentence(
+        percentage = profile.matchPercentage,
+        firstName = firstName,
+        percentColor = matchColor,
+    )
 
     Column(
         modifier = Modifier
