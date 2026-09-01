@@ -1,9 +1,22 @@
 package com.example.spectroom.ui.screens.discover
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,34 +33,46 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -62,13 +87,12 @@ import com.example.spectroom.data.model.ProfileCard
 import com.example.spectroom.data.model.SwipeType
 import com.example.spectroom.ui.components.TabBarBodyHeight
 import com.example.spectroom.ui.theme.DistanceAccent
-import com.example.spectroom.ui.theme.EnergyFullySocial
 import com.example.spectroom.ui.theme.EnergyLow
-import com.example.spectroom.ui.theme.EnergyModerate
 import com.example.spectroom.ui.theme.LikeGreen
 import com.example.spectroom.ui.theme.LikeRed
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
 import com.example.spectroom.ui.theme.PassRed
+import com.example.spectroom.ui.theme.TabSelected
 import com.example.spectroom.viewmodel.DiscoverUiState
 import kotlin.math.roundToInt
 
@@ -77,6 +101,40 @@ private val PhotoHeight = 340.dp
 private val CardHeight = 500.dp
 private val CardHorizontalInset = 30.dp
 private val CardAreaTopPadding = 150.dp
+private val CardVerticalOffset = 36.dp
+private val EnergyPickerContentPadding = 24.dp
+private val EnergyPickerHeaderHeight = 78.dp
+private val EnergyPickerSectionSpacing = 12.dp
+private val EnergyPickerRowHeight = 112.dp
+private val EnergyPickerPanelHeight =
+    EnergyPickerContentPadding * 2 +
+        EnergyPickerHeaderHeight +
+        EnergyPickerSectionSpacing +
+        EnergyPickerRowHeight * 3 +
+        EnergyPickerSectionSpacing * 2
+private val DiscoverDialogOptionsStackHeight =
+    EnergyPickerRowHeight * 3 + EnergyPickerSectionSpacing * 2
+private val DistancePickerRowHeight =
+    (DiscoverDialogOptionsStackHeight - EnergyPickerSectionSpacing * 4) / 5
+private val PickerPanelTopOrigin = TransformOrigin(0.5f, 0f)
+private val PickerPanelOpenSpring = spring<Float>(dampingRatio = 0.78f, stiffness = 220f)
+private val PickerPanelCloseSpring = spring<Float>(dampingRatio = 0.86f, stiffness = 340f)
+
+private fun pickerPanelEnterTransition() =
+    fadeIn(animationSpec = PickerPanelOpenSpring) +
+        scaleIn(
+            initialScale = 0.82f,
+            transformOrigin = PickerPanelTopOrigin,
+            animationSpec = PickerPanelOpenSpring,
+        )
+
+private fun pickerPanelExitTransition() =
+    fadeOut(animationSpec = PickerPanelCloseSpring) +
+        scaleOut(
+            targetScale = 0.82f,
+            transformOrigin = PickerPanelTopOrigin,
+            animationSpec = PickerPanelCloseSpring,
+        )
 private val ActionRowBottomPadding = TabBarBodyHeight
 private val CardAreaBottomPadding = 108.dp
 private val SwipeStampYOffset = 52.dp
@@ -87,6 +145,8 @@ fun DiscoverScreen(
     currentEnergyLevel: Int = EnergyLevel.FULLY_SOCIAL,
     profileIncomplete: Boolean = false,
     onSwipe: (SwipeType) -> Unit,
+    onProgrammaticSwipe: (SwipeType) -> Unit = {},
+    onProgrammaticSwipeComplete: (SwipeType) -> Unit = {},
     onUndo: () -> Unit,
     onSecondThoughts: () -> Unit,
     onOpenProfile: (ProfileCard) -> Unit = {},
@@ -95,11 +155,17 @@ fun DiscoverScreen(
     onFinishProfile: () -> Unit = {},
 ) {
     val colors = LocalSpectRoomColors.current
-    val profile = state.profiles.getOrNull(state.currentIndex)
     val reachedLimit = state.dailySwipeCount >= DiscoverDailyLimitStore.MAX_SWIPES_PER_DAY &&
         !state.isReviewingTodaysPasses
+    val frozenCardIndex = when {
+        state.profiles.isEmpty() -> -1
+        reachedLimit -> minOf(state.currentIndex, state.profiles.lastIndex).coerceAtLeast(0)
+        else -> state.currentIndex
+    }
+    val profile = state.profiles.getOrNull(frozenCardIndex)
     var showingEnergyPicker by remember { mutableStateOf(false) }
     var showingDistancePicker by remember { mutableStateOf(false) }
+    var showingDailyLimitWhy by remember { mutableStateOf(false) }
     val showActions = !profileIncomplete && !reachedLimit && profile != null
 
     Box(
@@ -118,7 +184,7 @@ fun DiscoverScreen(
                     top = CardAreaTopPadding,
                     bottom = CardAreaBottomPadding,
                 )
-                .offset(y = (-36).dp),
+                .offset(y = (-CardVerticalOffset)),
             contentAlignment = Alignment.TopCenter,
         ) {
             if (state.isReviewingTodaysPasses) {
@@ -139,18 +205,10 @@ fun DiscoverScreen(
                     modifier = Modifier.align(Alignment.Center),
                 )
                 profileIncomplete -> IncompleteProfileCard(onFinishProfile = onFinishProfile)
-                reachedLimit -> DailyLimitCard(
-                    canUseSecondThoughts = !state.hasUsedSecondThoughtsToday,
-                    isLoadingSecondThoughts = state.isLoadingSecondThoughts,
-                    errorMessage = state.secondThoughtsError,
-                    onSecondThoughts = onSecondThoughts,
-                )
                 profile == null -> EmptyDeckCard(modifier = Modifier.align(Alignment.Center))
                 else -> {
-                    // iOS pile: front card + up to 2 behind (scale down + peek upward)
-                    val start = state.currentIndex
+                    val start = frozenCardIndex
                     val end = minOf(start + 3, state.profiles.size)
-                    // Draw back → front so z-order is correct without relying only on zIndex
                     for (index in (end - 1) downTo start) {
                         val depth = index - start
                         val stacked = state.profiles[index]
@@ -158,8 +216,18 @@ fun DiscoverScreen(
                             profile = stacked,
                             depth = depth,
                             isTopCard = depth == 0,
+                            programmaticSwipe = if (depth == 0) state.programmaticSwipe else null,
+                            isDailyLimitReached = reachedLimit,
+                            canUseSecondThoughts = !state.hasUsedSecondThoughtsToday,
+                            isLoadingSecondThoughts = state.isLoadingSecondThoughts,
+                            secondThoughtsError = state.secondThoughtsError,
+                            onSecondThoughts = onSecondThoughts,
+                            onShowDailyLimitWhy = { showingDailyLimitWhy = true },
                             onSwiped = onSwipe,
-                            onOpen = { onOpenProfile(stacked) },
+                            onProgrammaticSwipeComplete = onProgrammaticSwipeComplete,
+                            onOpen = {
+                                if (!reachedLimit) onOpenProfile(stacked)
+                            },
                         )
                     }
                 }
@@ -177,7 +245,7 @@ fun DiscoverScreen(
                 ActionCircle(
                     icon = Icons.Filled.Close,
                     tint = PassRed,
-                    onClick = { onSwipe(SwipeType.PASS) },
+                    onClick = { onProgrammaticSwipe(SwipeType.PASS) },
                     size = 76.dp,
                     iconSize = 30.dp,
                 )
@@ -192,7 +260,7 @@ fun DiscoverScreen(
                 ActionCircle(
                     icon = Icons.Filled.Favorite,
                     tint = LikeGreen,
-                    onClick = { onSwipe(SwipeType.LIKE) },
+                    onClick = { onProgrammaticSwipe(SwipeType.LIKE) },
                     size = 76.dp,
                     iconSize = 30.dp,
                 )
@@ -244,102 +312,243 @@ fun DiscoverScreen(
             Text(text = EnergyLevel.emoji(currentEnergyLevel), fontSize = 20.sp)
         }
 
-        if (showingEnergyPicker) {
-            EnergyLevelPickerOverlay(
-                selectedLevel = currentEnergyLevel,
-                onSelect = { level ->
-                    onUpdateEnergyLevel(level)
-                    showingEnergyPicker = false
-                },
-                onDismiss = { showingEnergyPicker = false },
+        EnergyLevelPickerOverlay(
+            visible = showingEnergyPicker,
+            selectedLevel = currentEnergyLevel,
+            onSelect = { level ->
+                onUpdateEnergyLevel(level)
+                showingEnergyPicker = false
+            },
+            onDismiss = { showingEnergyPicker = false },
+        )
+
+        DistancePickerOverlay(
+            visible = showingDistancePicker,
+            selected = state.distanceOption,
+            onSelect = { option ->
+                onSetDistance(option)
+                showingDistancePicker = false
+            },
+            onDismiss = { showingDistancePicker = false },
+        )
+
+        if (showingDailyLimitWhy) {
+            DailyLimitWhyOverlay(onDismiss = { showingDailyLimitWhy = false })
+        }
+    }
+}
+
+@Composable
+private fun DiscoverPickerOverlayHost(
+    visible: Boolean,
+    zIndex: Float,
+    onDismiss: () -> Unit,
+    panel: @Composable () -> Unit,
+) {
+    val dismissInteraction = remember { MutableInteractionSource() }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .zIndex(zIndex),
+    ) {
+        if (visible) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = dismissInteraction,
+                        indication = null,
+                        onClick = onDismiss,
+                    ),
             )
         }
 
-        if (showingDistancePicker) {
-            DistancePickerOverlay(
-                selected = state.distanceOption,
-                onSelect = { option ->
-                    onSetDistance(option)
-                    showingDistancePicker = false
-                },
-                onDismiss = { showingDistancePicker = false },
-            )
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxSize()
+                .statusBarsPadding()
+                .padding(
+                    start = CardHorizontalInset,
+                    end = CardHorizontalInset,
+                    top = CardAreaTopPadding,
+                    bottom = CardAreaBottomPadding,
+                )
+                .offset(y = (-CardVerticalOffset)),
+        ) {
+            AnimatedVisibility(
+                visible = visible,
+                enter = pickerPanelEnterTransition(),
+                exit = pickerPanelExitTransition(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = CardHeight - EnergyPickerPanelHeight),
+            ) {
+                panel()
+            }
         }
     }
 }
 
 @Composable
 private fun DistancePickerOverlay(
+    visible: Boolean,
     selected: DiscoverDistanceOption,
     onSelect: (DiscoverDistanceOption) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val colors = LocalSpectRoomColors.current
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.35f))
-            .clickable(onClick = onDismiss)
-            .padding(24.dp),
-        contentAlignment = Alignment.Center,
+    val accent = EnergyLow
+    val panelShape = RoundedCornerShape(24.dp)
+    val rowShape = RoundedCornerShape(16.dp)
+    val panelBackground = if (colors.isDark) Color.Black else Color.White
+    val primaryText = if (colors.isDark) Color.White else Color.Black
+    val secondaryText = if (colors.isDark) Color.White.copy(alpha = 0.8f) else Color.Black.copy(alpha = 0.55f)
+
+    DiscoverPickerOverlayHost(
+        visible = visible,
+        zIndex = 201f,
+        onDismiss = onDismiss,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(24.dp))
-                .background(colors.card)
+                .height(EnergyPickerPanelHeight)
+                .shadow(
+                    elevation = 16.dp,
+                    shape = panelShape,
+                    ambientColor = Color.Black.copy(alpha = 0.12f),
+                    spotColor = Color.Black.copy(alpha = 0.12f),
+                )
+                .clip(panelShape)
+                .background(panelBackground)
+                .border(
+                    width = 1.dp,
+                    color = if (colors.isDark) Color.Transparent else Color.Black.copy(alpha = 0.06f),
+                    shape = panelShape,
+                )
                 .clickable(enabled = false) {}
-                .padding(20.dp),
+                .padding(EnergyPickerContentPadding),
         ) {
-            Text(
-                stringResource(R.string.discover_distance_title),
-                fontWeight = FontWeight.Bold,
-                fontSize = 22.sp,
-                color = colors.text,
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                stringResource(R.string.discover_distance_subtitle),
-                color = colors.secondaryText,
-                fontSize = 14.sp,
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            DiscoverDistanceOption.entries.forEach { option ->
-                val isSelected = option == selected
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 6.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(
-                            if (isSelected) DistanceAccent.copy(alpha = 0.18f) else colors.background,
-                        )
-                        .border(
-                            if (isSelected) 2.dp else 1.dp,
-                            if (isSelected) DistanceAccent else colors.border,
-                            RoundedCornerShape(16.dp),
-                        )
-                        .clickable { onSelect(option) }
-                        .padding(horizontal = 14.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                        .height(EnergyPickerHeaderHeight),
+                    verticalArrangement = Arrangement.Top,
                 ) {
                     Text(
-                        text = when (option) {
-                            DiscoverDistanceOption.FIVE_KM -> stringResource(R.string.settings_distance_5km)
-                            DiscoverDistanceOption.TEN_KM -> stringResource(R.string.settings_distance_10km)
-                            DiscoverDistanceOption.TWENTY_KM -> stringResource(R.string.settings_distance_20km)
-                            DiscoverDistanceOption.FIFTY_KM -> stringResource(R.string.settings_distance_50km)
-                            DiscoverDistanceOption.UNLIMITED -> stringResource(R.string.settings_distance_unlimited)
-                        },
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.text,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        option.shortButtonTitle,
-                        color = if (isSelected) DistanceAccent else colors.secondaryText,
+                        text = stringResource(R.string.discover_distance_title),
                         fontWeight = FontWeight.Bold,
+                        fontSize = 24.sp,
+                        color = primaryText,
                     )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = stringResource(R.string.discover_distance_subtitle),
+                        color = secondaryText,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        lineHeight = 21.sp,
+                    )
+                }
+                Spacer(modifier = Modifier.height(EnergyPickerSectionSpacing))
+                Column(verticalArrangement = Arrangement.spacedBy(EnergyPickerSectionSpacing)) {
+                    DiscoverDistanceOption.entries.forEach { option ->
+                        val isSelected = option == selected
+                        val iconColor = if (isSelected) {
+                            accent
+                        } else if (colors.isDark) {
+                            Color.White.copy(alpha = 0.45f)
+                        } else {
+                            Color.Black.copy(alpha = 0.45f)
+                        }
+                        val fill = if (isSelected) {
+                            accent.copy(alpha = if (colors.isDark) 0.28f else 0.18f)
+                        } else if (colors.isDark) {
+                            Color.White.copy(alpha = 0.08f)
+                        } else {
+                            Color.Black.copy(alpha = 0.05f)
+                        }
+                        val stroke = if (isSelected) {
+                            accent.copy(alpha = 0.95f)
+                        } else if (colors.isDark) {
+                            Color.White.copy(alpha = 0.18f)
+                        } else {
+                            Color.Black.copy(alpha = 0.14f)
+                        }
+                        val titleColor = if (isSelected) primaryText else primaryText.copy(alpha = 0.75f)
+                        val rowInteraction = remember(option) { MutableInteractionSource() }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(DistancePickerRowHeight)
+                                .clip(rowShape)
+                                .background(fill)
+                                .border(
+                                    width = if (isSelected) 2.dp else 1.dp,
+                                    color = stroke,
+                                    shape = rowShape,
+                                )
+                                .clickable(
+                                    interactionSource = rowInteraction,
+                                    indication = null,
+                                    onClick = { onSelect(option) },
+                                )
+                                .padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                modifier = Modifier.size(36.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Image(
+                                    painter = painterResource(option.iconRes()),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(22.dp),
+                                    colorFilter = ColorFilter.tint(iconColor),
+                                )
+                            }
+                            if (option == DiscoverDistanceOption.UNLIMITED) {
+                                Text(
+                                    text = stringResource(option.titleRes()),
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 18.sp,
+                                    color = titleColor,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            } else {
+                                Text(
+                                    text = stringResource(option.titleRes()),
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 18.sp,
+                                    color = titleColor,
+                                    modifier = Modifier.width(64.dp),
+                                )
+                                Box(
+                                    modifier = Modifier.weight(1f),
+                                    contentAlignment = Alignment.CenterStart,
+                                ) {
+                                    DistanceIllustrationBar(
+                                        option = option,
+                                        color = iconColor,
+                                    )
+                                }
+                            }
+                            Box(
+                                modifier = Modifier.size(20.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Check,
+                                        contentDescription = null,
+                                        tint = accent,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                            }
+                        }
                 }
             }
         }
@@ -347,78 +556,272 @@ private fun DistancePickerOverlay(
 }
 
 @Composable
-private fun EnergyLevelPickerOverlay(
-    selectedLevel: Int,
-    onSelect: (Int) -> Unit,
-    onDismiss: () -> Unit,
+private fun DistanceIllustrationBar(
+    option: DiscoverDistanceOption,
+    color: Color,
 ) {
+    val barWidth = option.illustrationBarWidthDp?.dp ?: return
+    val tickHeight = 9.dp
+    val tickWidth = 2.dp
+    Box(
+        modifier = Modifier
+            .width(barWidth)
+            .height(tickHeight),
+    ) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .width(barWidth)
+                .height(3.dp)
+                .clip(RoundedCornerShape(50))
+                .background(color),
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .size(tickWidth, tickHeight)
+                .clip(RoundedCornerShape(50))
+                .background(color),
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .offset(x = barWidth - tickWidth)
+                .size(tickWidth, tickHeight)
+                .clip(RoundedCornerShape(50))
+                .background(color),
+        )
+    }
+}
+
+@Composable
+private fun DailyLimitWhyOverlay(onDismiss: () -> Unit) {
     val colors = LocalSpectRoomColors.current
+    val dismissInteraction = remember { MutableInteractionSource() }
+    val okInteraction = remember { MutableInteractionSource() }
+    val cardShape = RoundedCornerShape(28.dp)
+    val cardBackground = if (colors.isDark) {
+        Color(0xFF2C2C2E).copy(alpha = 0.88f)
+    } else {
+        Color.White.copy(alpha = 0.82f)
+    }
+    val buttonBackground = if (colors.isDark) {
+        Color.White.copy(alpha = 0.12f)
+    } else {
+        Color.Black.copy(alpha = 0.08f)
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .zIndex(100f)
             .background(Color.Black.copy(alpha = 0.35f))
-            .clickable(onClick = onDismiss)
-            .padding(24.dp),
+            .clickable(
+                interactionSource = dismissInteraction,
+                indication = null,
+                onClick = onDismiss,
+            )
+            .padding(horizontal = 28.dp),
         contentAlignment = Alignment.Center,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(24.dp))
-                .background(colors.card)
+                .clip(cardShape)
+                .background(cardBackground)
+                .border(
+                    width = 0.5.dp,
+                    color = if (colors.isDark) {
+                        Color.White.copy(alpha = 0.14f)
+                    } else {
+                        Color.White.copy(alpha = 0.65f)
+                    },
+                    shape = cardShape,
+                )
                 .clickable(enabled = false) {}
-                .padding(20.dp),
+                .padding(horizontal = 20.dp, vertical = 22.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                stringResource(R.string.discover_energy_title),
+                text = stringResource(R.string.discover_daily_limit_why_title),
                 fontWeight = FontWeight.Bold,
-                fontSize = 22.sp,
+                fontSize = 17.sp,
                 color = colors.text,
+                textAlign = TextAlign.Center,
             )
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(10.dp))
             Text(
-                stringResource(R.string.discover_energy_subtitle),
+                text = stringResource(R.string.discover_daily_limit_why_message),
                 color = colors.secondaryText,
-                fontSize = 14.sp,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+                textAlign = TextAlign.Center,
             )
-            Spacer(modifier = Modifier.height(16.dp))
-            EnergyLevel.all.forEach { level ->
-                val selected = EnergyLevel.resolve(selectedLevel) == level
-                val accent = when (level) {
-                    EnergyLevel.LOW -> EnergyLow
-                    EnergyLevel.MODERATE -> EnergyModerate
-                    else -> EnergyFullySocial
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 6.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(
-                            if (selected) accent.copy(alpha = 0.18f) else colors.background,
-                        )
-                        .border(
-                            if (selected) 2.dp else 1.dp,
-                            if (selected) accent else colors.border,
-                            RoundedCornerShape(16.dp),
-                        )
-                        .clickable { onSelect(level) }
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(EnergyLevel.emoji(level), fontSize = 26.sp)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            EnergyLevel.label(level),
-                            fontWeight = FontWeight.SemiBold,
-                            color = colors.text,
-                        )
-                        Text(
-                            EnergyLevel.detail(level),
-                            color = colors.secondaryText,
-                            fontSize = 13.sp,
-                        )
+            Spacer(modifier = Modifier.height(22.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(50))
+                    .background(buttonBackground)
+                    .clickable(
+                        interactionSource = okInteraction,
+                        indication = null,
+                        onClick = onDismiss,
+                    )
+                    .padding(vertical = 14.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = stringResource(R.string.common_ok),
+                    color = colors.text,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 17.sp,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun EnergyLevelPickerOverlay(
+    visible: Boolean,
+    selectedLevel: Int,
+    onSelect: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = LocalSpectRoomColors.current
+    val accent = EnergyLow
+    val panelShape = RoundedCornerShape(24.dp)
+    val rowShape = RoundedCornerShape(16.dp)
+    val panelBackground = if (colors.isDark) Color.Black else Color.White
+    val primaryText = if (colors.isDark) Color.White else Color.Black
+    val secondaryText = if (colors.isDark) Color.White.copy(alpha = 0.8f) else Color.Black.copy(alpha = 0.55f)
+
+    DiscoverPickerOverlayHost(
+        visible = visible,
+        zIndex = 200f,
+        onDismiss = onDismiss,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(EnergyPickerPanelHeight)
+                .shadow(
+                    elevation = 16.dp,
+                    shape = panelShape,
+                    ambientColor = Color.Black.copy(alpha = 0.12f),
+                    spotColor = Color.Black.copy(alpha = 0.12f),
+                )
+                .clip(panelShape)
+                .background(panelBackground)
+                .border(
+                    width = 1.dp,
+                    color = if (colors.isDark) Color.Transparent else Color.Black.copy(alpha = 0.06f),
+                    shape = panelShape,
+                )
+                .clickable(enabled = false) {}
+                .padding(EnergyPickerContentPadding),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(EnergyPickerHeaderHeight),
+                verticalArrangement = Arrangement.Top,
+            ) {
+                Text(
+                    text = stringResource(R.string.profile_my_energy_level),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 24.sp,
+                    color = primaryText,
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = stringResource(R.string.profile_energy_level_subtitle),
+                    color = secondaryText,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    lineHeight = 21.sp,
+                )
+            }
+            Spacer(modifier = Modifier.height(EnergyPickerSectionSpacing))
+            Column(verticalArrangement = Arrangement.spacedBy(EnergyPickerSectionSpacing)) {
+                EnergyLevel.all.forEach { level ->
+                    val selected = EnergyLevel.resolve(selectedLevel) == level
+                    val fill = if (selected) {
+                        accent.copy(alpha = if (colors.isDark) 0.28f else 0.18f)
+                    } else if (colors.isDark) {
+                        Color.White.copy(alpha = 0.08f)
+                    } else {
+                        Color.Black.copy(alpha = 0.05f)
+                    }
+                    val stroke = if (selected) {
+                        accent.copy(alpha = 0.95f)
+                    } else if (colors.isDark) {
+                        Color.White.copy(alpha = 0.18f)
+                    } else {
+                        Color.Black.copy(alpha = 0.14f)
+                    }
+                    val titleColor = if (selected) primaryText else primaryText.copy(alpha = 0.75f)
+                    val detailColor = if (selected) secondaryText else secondaryText.copy(alpha = 0.85f)
+                    val rowInteraction = remember(level) { MutableInteractionSource() }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(EnergyPickerRowHeight)
+                            .clip(rowShape)
+                            .background(fill)
+                            .border(
+                                width = if (selected) 2.dp else 1.dp,
+                                color = stroke,
+                                shape = rowShape,
+                            )
+                            .clickable(
+                                interactionSource = rowInteraction,
+                                indication = null,
+                                onClick = { onSelect(level) },
+                            )
+                            .padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier.size(36.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(EnergyLevel.emoji(level), fontSize = 28.sp)
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                text = stringResource(EnergyLevel.titleRes(level)),
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 18.sp,
+                                color = titleColor,
+                            )
+                            Text(
+                                text = stringResource(EnergyLevel.detailRes(level)),
+                                color = detailColor,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium,
+                                lineHeight = 20.sp,
+                            )
+                        }
+                        Box(
+                            modifier = Modifier.size(20.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (selected) {
+                                Icon(
+                                    imageVector = Icons.Filled.Check,
+                                    contentDescription = null,
+                                    tint = accent,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -431,15 +834,51 @@ private fun SwipeableProfileCard(
     profile: ProfileCard,
     depth: Int = 0,
     isTopCard: Boolean = true,
+    programmaticSwipe: SwipeType? = null,
+    isDailyLimitReached: Boolean = false,
+    canUseSecondThoughts: Boolean = false,
+    isLoadingSecondThoughts: Boolean = false,
+    secondThoughtsError: String? = null,
+    onSecondThoughts: () -> Unit = {},
+    onShowDailyLimitWhy: () -> Unit = {},
     onSwiped: (SwipeType) -> Unit,
+    onProgrammaticSwipeComplete: (SwipeType) -> Unit = {},
     onOpen: () -> Unit,
 ) {
     var offsetX by remember(profile.userId) { mutableFloatStateOf(0f) }
     var offsetY by remember(profile.userId) { mutableFloatStateOf(0f) }
-    val rotation = if (isTopCard) offsetX / 20f else 0f
+    var isAnimatingProgrammaticSwipe by remember(profile.userId) { mutableStateOf(false) }
+    val rotation = if (isTopCard && !isDailyLimitReached) offsetX / 20f else 0f
     val density = LocalDensity.current
     val threshold = with(density) { 100.dp.toPx() }
-    var totalDrag by remember(profile.userId) { mutableFloatStateOf(0f) }
+    val handleGestures = rememberUpdatedState(isTopCard && !isDailyLimitReached && !isAnimatingProgrammaticSwipe)
+
+    LaunchedEffect(programmaticSwipe) {
+        val action = programmaticSwipe ?: return@LaunchedEffect
+        if (!isTopCard || isDailyLimitReached) return@LaunchedEffect
+        isAnimatingProgrammaticSwipe = true
+        val stampOffset = with(density) { 170.dp.toPx() }
+        val offScreen = with(density) { 1000.dp.toPx() }
+        val toward = when (action) {
+            SwipeType.PASS -> -1f
+            SwipeType.LIKE, SwipeType.SUPER_LIKE -> 1f
+        }
+        animate(
+            initialValue = offsetX,
+            targetValue = stampOffset * toward,
+            animationSpec = tween(durationMillis = 600),
+        ) { value, _ -> offsetX = value }
+        animate(
+            initialValue = offsetX,
+            targetValue = offScreen * toward,
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioMediumBouncy,
+                stiffness = Spring.StiffnessMedium,
+            ),
+        ) { value, _ -> offsetX = value }
+        onProgrammaticSwipeComplete(action)
+        isAnimatingProgrammaticSwipe = false
+    }
 
     // Match iOS StackAppearance: scale = max(0.95, 1 - depth*0.02), y = depth * -24
     val stackScale = maxOf(0.95f, 1f - depth * 0.02f)
@@ -455,52 +894,90 @@ private fun SwipeableProfileCard(
                 scaleX = stackScale
                 scaleY = stackScale
                 translationY = stackYOffsetPx
-                alpha = stackAlpha
+                alpha = if (isDailyLimitReached) 0.85f else stackAlpha
             }
             .offset {
                 IntOffset(
-                    if (isTopCard) offsetX.roundToInt() else 0,
-                    if (isTopCard) offsetY.roundToInt() else 0,
+                    if (isTopCard && !isDailyLimitReached) offsetX.roundToInt() else 0,
+                    if (isTopCard && !isDailyLimitReached) offsetY.roundToInt() else 0,
                 )
             }
             .rotate(rotation)
             .then(
-                if (isTopCard) {
-                    Modifier.pointerInput(profile.userId) {
-                        detectDragGestures(
-                            onDragStart = { totalDrag = 0f },
-                            onDragEnd = {
+                if (!isDailyLimitReached) {
+                    Modifier.pointerInput(profile.userId, isAnimatingProgrammaticSwipe) {
+                        // Attach gestures to every visible stacked card so the next card is ready
+                        // before it becomes top (avoids losing the first tap/swipe after promotion).
+                        awaitEachGesture {
+                            if (!handleGestures.value) return@awaitEachGesture
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            var totalDrag = Offset.Zero
+                            var isDragging = false
+                            val touchSlop = viewConfiguration.touchSlop
+                            do {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!change.pressed) continue
+                                val delta = change.positionChange()
+                                if (!isDragging) {
+                                    totalDrag += delta
+                                    if (totalDrag.getDistance() > touchSlop) {
+                                        isDragging = true
+                                    }
+                                }
+                                if (isDragging) {
+                                    change.consume()
+                                    offsetX += delta.x
+                                    offsetY += delta.y * 0.25f
+                                }
+                            } while (event.changes.any { it.pressed })
+                            if (!isDragging) {
+                                onOpen()
+                            } else {
                                 when {
                                     offsetX > threshold -> onSwiped(SwipeType.LIKE)
                                     offsetX < -threshold -> onSwiped(SwipeType.PASS)
-                                    totalDrag < 12f -> {
-                                        offsetX = 0f
-                                        offsetY = 0f
-                                        onOpen()
-                                    }
                                     else -> {
                                         offsetX = 0f
                                         offsetY = 0f
                                     }
                                 }
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                offsetX += dragAmount.x
-                                offsetY += dragAmount.y * 0.25f
-                                totalDrag += kotlin.math.abs(dragAmount.x) +
-                                    kotlin.math.abs(dragAmount.y)
-                            },
-                        )
+                            }
+                        }
                     }
                 } else {
                     Modifier
                 },
             ),
     ) {
-        ProfileCardContent(profile = profile)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(if (isDailyLimitReached) Modifier.blur(8.dp) else Modifier),
+        ) {
+            ProfileCardContent(profile = profile)
+        }
 
-        if (isTopCard) {
+        if (isDailyLimitReached) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(CardCorner))
+                    .background(Color.Black.copy(alpha = 0.28f)),
+            )
+        }
+
+        if (isDailyLimitReached && isTopCard) {
+            DailyLimitOverlay(
+                canUseSecondThoughts = canUseSecondThoughts,
+                isLoadingSecondThoughts = isLoadingSecondThoughts,
+                errorMessage = secondThoughtsError,
+                onSecondThoughts = onSecondThoughts,
+                onShowWhy = onShowDailyLimitWhy,
+            )
+        }
+
+        if (isTopCard && !isDailyLimitReached) {
             val stampAlpha = (kotlin.math.abs(offsetX) / 170f).coerceIn(0f, 1f)
             if (offsetX > 40 || offsetX < -40) {
                 Box(
@@ -526,6 +1003,81 @@ private fun SwipeableProfileCard(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun DailyLimitOverlay(
+    canUseSecondThoughts: Boolean,
+    isLoadingSecondThoughts: Boolean,
+    errorMessage: String?,
+    onSecondThoughts: () -> Unit,
+    onShowWhy: () -> Unit,
+) {
+    val whyInteractionSource = remember { MutableInteractionSource() }
+    val secondThoughtsInteractionSource = remember { MutableInteractionSource() }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = stringResource(R.string.discover_daily_limit_title),
+            fontWeight = FontWeight.Bold,
+            fontSize = 22.sp,
+            color = Color.White,
+            textAlign = TextAlign.Center,
+        )
+        if (!errorMessage.isNullOrBlank()) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = errorMessage,
+                color = Color.White.copy(alpha = 0.92f),
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+            )
+        }
+        if (canUseSecondThoughts) {
+            Spacer(modifier = Modifier.height(18.dp))
+            if (isLoadingSecondThoughts) {
+                CircularProgressIndicator(
+                    color = Color.White,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(22.dp),
+                )
+            } else {
+                Text(
+                    text = stringResource(R.string.discover_second_thoughts),
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 15.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .clickable(
+                            interactionSource = secondThoughtsInteractionSource,
+                            indication = null,
+                            onClick = onSecondThoughts,
+                        )
+                        .padding(horizontal = 24.dp, vertical = 4.dp),
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(if (canUseSecondThoughts) 2.dp else 0.dp))
+        Spacer(modifier = Modifier.height(18.dp))
+        Text(
+            text = stringResource(R.string.discover_daily_limit_why),
+            color = Color.White.copy(alpha = 0.92f),
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 14.sp,
+            textDecoration = TextDecoration.Underline,
+            modifier = Modifier.clickable(
+                interactionSource = whyInteractionSource,
+                indication = null,
+                onClick = onShowWhy,
+            ),
+        )
     }
 }
 
@@ -733,80 +1285,6 @@ private fun SwipeStamp(text: String, color: Color, modifier: Modifier = Modifier
 }
 
 @Composable
-private fun DailyLimitCard(
-    canUseSecondThoughts: Boolean,
-    isLoadingSecondThoughts: Boolean = false,
-    errorMessage: String? = null,
-    onSecondThoughts: () -> Unit,
-) {
-    val colors = LocalSpectRoomColors.current
-    var showingWhy by remember { mutableStateOf(false) }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(colors.card)
-            .border(1.dp, colors.border, RoundedCornerShape(24.dp))
-            .padding(28.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            stringResource(R.string.discover_daily_limit_title),
-            fontWeight = FontWeight.Bold,
-            fontSize = 22.sp,
-            color = colors.text,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = stringResource(R.string.discover_daily_limit_body),
-            color = colors.secondaryText,
-            fontSize = 14.sp,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        )
-        if (!errorMessage.isNullOrBlank()) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(errorMessage, color = LikeRed, fontSize = 13.sp)
-        }
-        if (canUseSecondThoughts) {
-            Spacer(modifier = Modifier.height(16.dp))
-            if (isLoadingSecondThoughts) {
-                androidx.compose.material3.CircularProgressIndicator(color = DistanceAccent)
-            } else {
-                TextButton(onClick = onSecondThoughts) {
-                    Text(stringResource(R.string.discover_second_thoughts), color = DistanceAccent)
-                }
-            }
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        TextButton(onClick = { showingWhy = true }) {
-            Text(
-                stringResource(R.string.discover_daily_limit_why),
-                color = colors.secondaryText,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 14.sp,
-            )
-        }
-    }
-
-    if (showingWhy) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showingWhy = false },
-            title = {
-                Text(stringResource(R.string.discover_daily_limit_why_title))
-            },
-            text = {
-                Text(stringResource(R.string.discover_daily_limit_why_message))
-            },
-            confirmButton = {
-                TextButton(onClick = { showingWhy = false }) {
-                    Text(stringResource(R.string.common_ok))
-                }
-            },
-        )
-    }
-}
-
-@Composable
 private fun IncompleteProfileCard(onFinishProfile: () -> Unit) {
     val colors = LocalSpectRoomColors.current
     Column(
@@ -842,17 +1320,29 @@ private fun IncompleteProfileCard(onFinishProfile: () -> Unit) {
 @Composable
 private fun EmptyDeckCard(modifier: Modifier = Modifier) {
     val colors = LocalSpectRoomColors.current
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = modifier.padding(24.dp),
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(CardHeight)
+            .shadow(
+                elevation = 16.dp,
+                shape = RoundedCornerShape(CardCorner),
+                ambientColor = Color.Black.copy(alpha = 0.12f),
+                spotColor = Color.Black.copy(alpha = 0.12f),
+            )
+            .clip(RoundedCornerShape(CardCorner))
+            .background(colors.card),
+        contentAlignment = Alignment.Center,
     ) {
         Text(
-            stringResource(R.string.discover_empty),
-            fontWeight = FontWeight.SemiBold,
+            text = stringResource(R.string.discover_empty),
+            fontWeight = FontWeight.Bold,
+            fontSize = 22.sp,
             color = colors.text,
+            textAlign = TextAlign.Center,
+            lineHeight = 28.sp,
+            modifier = Modifier.padding(horizontal = 28.dp),
         )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(stringResource(R.string.discover_empty_hint), color = colors.secondaryText)
     }
 }
 

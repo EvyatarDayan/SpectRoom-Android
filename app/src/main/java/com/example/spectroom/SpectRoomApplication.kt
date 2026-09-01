@@ -2,6 +2,7 @@ package com.example.spectroom
 
 import android.app.Application
 import com.example.spectroom.data.local.AppPrefsStore
+import com.example.spectroom.data.remote.FirebasePhoneAuthDebug
 import com.google.firebase.FirebaseApp
 import org.maplibre.android.MapLibre
 
@@ -10,6 +11,7 @@ class SpectRoomApplication : Application() {
         super.onCreate()
         MapLibre.getInstance(this)
         FirebaseApp.initializeApp(this)
+        FirebasePhoneAuthDebug.applyIfNeeded(this)
         AppPrefsStore(this).applyStoredLocale()
     }
 }

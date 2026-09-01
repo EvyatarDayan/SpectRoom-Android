@@ -1,8 +1,8 @@
 package com.example.spectroom.viewmodel
 
+import android.net.Uri
 import android.app.Activity
 import android.app.Application
-import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.spectroom.data.local.AppPrefsStore
@@ -20,6 +20,8 @@ import com.example.spectroom.data.model.ModerationFreezeDuration
 import com.example.spectroom.data.model.ModerationNotice
 import com.example.spectroom.data.model.SupportTopic
 import com.example.spectroom.data.model.UserReport
+import com.google.firebase.auth.FirebaseAuthException
+import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
 import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.tasks.await
 import androidx.core.content.FileProvider
@@ -33,7 +35,9 @@ import com.example.spectroom.data.model.LookingForOption
 import com.example.spectroom.data.model.MatchBreakdown
 import com.example.spectroom.data.model.MatchDisplay
 import com.example.spectroom.data.model.MessageDisplay
+import com.example.spectroom.data.model.MessageType
 import com.example.spectroom.data.model.ProfileCard
+import com.example.spectroom.data.model.ProfileReportReason
 import com.example.spectroom.data.model.SpectRoomUser
 import com.example.spectroom.data.model.SwipeType
 import com.example.spectroom.data.model.UserProfileStatus
@@ -61,10 +65,12 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.DateFormat
 import java.util.Date
+import java.util.UUID
 
 enum class AppDestination {
     LOADING,
@@ -82,6 +88,7 @@ enum class MfaUiMode {
 
 data class AppUiState(
     val destination: AppDestination = AppDestination.LOADING,
+    val hasResolvedAuthState: Boolean = false,
     val isAuthenticated: Boolean = false,
     val isNewSignup: Boolean = false,
     val hasCompletedOnboarding: Boolean = false,
@@ -94,6 +101,7 @@ data class AppUiState(
     val unreadMessagesCount: Int = 0,
     val authError: String? = null,
     val authNotice: String? = null,
+    val authPopupTitle: String? = null,
     val isAuthLoading: Boolean = false,
     val profileSaveError: String? = null,
     val isSavingProfile: Boolean = false,
@@ -117,6 +125,7 @@ data class AppUiState(
     val mfaEditingPhone: Boolean = false,
     val viewingProfile: ProfileCard? = null,
     val isRecordingVoice: Boolean = false,
+    val recordingDurationSeconds: Double = 0.0,
     val languageCode: String = "en",
     val notificationsEnabled: Boolean = true,
     val soundEnabled: Boolean = true,
@@ -147,6 +156,10 @@ data class DiscoverUiState(
     val lastSwipeCountedTowardLimit: Boolean = false,
     val lastDocumentId: String? = null,
     val hasMore: Boolean = true,
+    /** Triggers the top card fly-off animation (Pass / Like buttons, block-from-profile). */
+    val programmaticSwipe: SwipeType? = null,
+    /** When set, the next programmatic pass only advances the pile (no Firestore swipe). */
+    val blockPassUserId: String? = null,
 )
 
 data class SocialUiState(
@@ -162,6 +175,8 @@ data class SocialUiState(
     val isLoadingMessages: Boolean = false,
     val isSendingMessage: Boolean = false,
     val isUploadingPhoto: Boolean = false,
+    val chatImageLocalPreviews: Map<String, String> = emptyMap(),
+    val uploadingImageContentKey: String? = null,
     val messageHistoryMatchIds: Set<String> = emptySet(),
 )
 
@@ -199,11 +214,17 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
     private var pendingVoiceDuration: Double = 0.0
     private var activityProvider: (() -> Activity?)? = null
     private var realtimeJobs: List<Job> = emptyList()
-    private var hasPrimedIncomingListener = false
     private var lastPresentedMatchId: String? = null
     private var presenceHeartbeatJob: Job? = null
     private var messageSearchJob: Job? = null
     private var chatAutoRefreshJob: Job? = null
+    private var voiceRecordingTickerJob: Job? = null
+    private var lastPlayedMessageSoundId: String? = null
+    private var suppressIncomingMessageSoundUntil: Long = 0L
+    private var knownChatMessageKeys: Set<String> = emptySet()
+    private var chatSoundBaselineReady: Boolean = false
+    private var lastChimeAtMs: Long = 0L
+    private val pendingIncomingImageSoundKeys = mutableSetOf<String>()
     private var savedProfilesBeforeSecondThoughts: List<ProfileCard> = emptyList()
     private var savedCardIndexBeforeSecondThoughts: Int = 0
 
@@ -214,11 +235,8 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             languageCode = appPrefs.languageCode,
             notificationsEnabled = appPrefs.notificationsEnabled,
             soundEnabled = appPrefs.soundEnabled,
-            destination = if (appPrefs.hasCompletedOnboarding) {
-                AppDestination.LOADING
-            } else {
-                AppDestination.ONBOARDING
-            },
+            isAuthenticated = authRepository.currentUid != null,
+            destination = AppDestination.LOADING,
         ),
     )
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
@@ -237,6 +255,12 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
 
     private val _reportTarget = MutableStateFlow<ProfileCard?>(null)
     val reportTarget: StateFlow<ProfileCard?> = _reportTarget.asStateFlow()
+
+    private val _reportAfterBlock = MutableStateFlow(false)
+    val reportAfterBlock: StateFlow<Boolean> = _reportAfterBlock.asStateFlow()
+
+    private val _showReportThankYou = MutableStateFlow(false)
+    val showReportThankYou: StateFlow<Boolean> = _showReportThankYou.asStateFlow()
 
     private val _infoSheet = MutableStateFlow<InfoSheetType?>(null)
     val infoSheet: StateFlow<InfoSheetType?> = _infoSheet.asStateFlow()
@@ -291,26 +315,73 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             authRepository.authState().collect { user ->
                 if (user == null) {
-                    _uiState.update {
-                        it.copy(
+                    val pendingMfaSignIn = mfaAuthRepository.hasPendingSignIn ||
+                        (_uiState.value.destination == AppDestination.MFA &&
+                            _uiState.value.mfaMode == MfaUiMode.SIGN_IN)
+                    _uiState.update { state ->
+                        val cleared = state.copy(
+                            hasResolvedAuthState = true,
                             isAuthenticated = false,
                             currentUser = null,
                             isAdmin = false,
                             activeChatPartnerId = null,
-                            destination = if (it.hasCompletedOnboarding) {
-                                AppDestination.AUTH
-                            } else {
-                                AppDestination.ONBOARDING
-                            },
+                        )
+                        if (pendingMfaSignIn) {
+                            cleared
+                        } else {
+                            cleared.copy(
+                                destination = if (state.hasCompletedOnboarding) {
+                                    AppDestination.AUTH
+                                } else {
+                                    AppDestination.ONBOARDING
+                                },
+                            )
+                        }
+                    }
+                    if (!pendingMfaSignIn) {
+                        _discoverState.value = DiscoverUiState()
+                        _socialState.value = SocialUiState()
+                    }
+                } else {
+                    if (!appPrefs.hasCompletedOnboarding) {
+                        appPrefs.hasCompletedOnboarding = true
+                    }
+                    _uiState.update {
+                        it.copy(
+                            hasResolvedAuthState = true,
+                            hasCompletedOnboarding = true,
                         )
                     }
-                    _discoverState.value = DiscoverUiState()
-                    _socialState.value = SocialUiState()
-                } else {
                     refreshSession()
                 }
             }
         }
+        viewModelScope.launch {
+            socialState.collect { social ->
+                val partnerId = _uiState.value.activeChatPartnerId
+                if (partnerId.isNullOrBlank() || !chatSoundBaselineReady) return@collect
+                val keys = social.chatMessages.map { it.deduplicationKey }.toSet()
+                // iOS parity: only chime for messages from the open chat partner.
+                val newIncoming = social.chatMessages.filter {
+                    it.deduplicationKey !in knownChatMessageKeys && it.senderId == partnerId
+                }
+                knownChatMessageKeys = keys
+                if (newIncoming.isNotEmpty()) {
+                    handleNewIncomingChatMessages(newIncoming)
+                }
+            }
+        }
+    }
+
+    private fun resetChatSoundBaseline() {
+        chatSoundBaselineReady = false
+        knownChatMessageKeys = emptySet()
+        pendingIncomingImageSoundKeys.clear()
+    }
+
+    private fun establishChatSoundBaseline() {
+        knownChatMessageKeys = _socialState.value.chatMessages.map { it.deduplicationKey }.toSet()
+        chatSoundBaselineReady = true
     }
 
     fun attachActivity(provider: () -> Activity?) {
@@ -323,13 +394,12 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         super.onCleared()
     }
 
-    fun completeOnboarding(dontShowAgain: Boolean = true) {
-        if (dontShowAgain) {
-            appPrefs.hasCompletedOnboarding = true
-        }
+    fun completeOnboarding(dontShowAgain: Boolean = false) {
+        appPrefs.hasCompletedOnboarding = true
+        appPrefs.dontShowWelcomeAgain = dontShowAgain
         _uiState.update {
             it.copy(
-                hasCompletedOnboarding = appPrefs.hasCompletedOnboarding,
+                hasCompletedOnboarding = true,
                 destination = AppDestination.AUTH,
             )
         }
@@ -412,39 +482,30 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             _uiState.update { it.copy(isSavingProfile = true, profileSaveError = null) }
             val result = authRepository.saveUserProfile(updatedUser)
             result.onSuccess { saved ->
-                val needsMfa = !mfaAuthRepository.isMfaEnrolled
-                val emailVerified = if (needsMfa) {
-                    runCatching { mfaAuthRepository.reloadAndIsEmailVerified() }.getOrDefault(false)
-                } else {
-                    true
-                }
-                if (needsMfa && !emailVerified) {
-                    runCatching { mfaAuthRepository.sendEmailVerificationForMfa() }
-                }
+                val needsMfa = !mfaAuthRepository.isMfaEnrolledOrBypassed()
                 _uiState.update {
                     it.copy(
                         currentUser = saved,
                         hasCompletedInitialProfile = true,
                         isNewSignup = false,
-                        destination = if (needsMfa) AppDestination.MFA else AppDestination.MAIN,
-                        mfaMode = MfaUiMode.ENROLL,
-                        mfaEmailAddress = mfaAuthRepository.currentEmail(),
-                        mfaEmailVerified = emailVerified,
-                        mfaResolvedPhoneE164 = "",
-                        mfaSmsSent = false,
-                        mfaSmsFailed = false,
-                        mfaSmsRateLimited = false,
-                        mfaEditingPhone = false,
-                        profileSaveError = null,
-                        isSavingProfile = false,
                     )
                 }
                 applyUnlimitedDistanceIfNeeded(saved)
                 if (needsMfa) {
-                    resolveMfaEnrollmentPhone()
+                    enterMfaEnrollment(emailAlreadyChecked = false)
                 } else {
+                    _uiState.update {
+                        it.copy(
+                            destination = AppDestination.MAIN,
+                            profileSaveError = null,
+                            isSavingProfile = false,
+                        )
+                    }
                     loadDiscoverDeck()
                     refreshSocial()
+                    startRealtime()
+                    syncFcmToken()
+                    setOnline(true)
                 }
             }.onFailure { error ->
                 _uiState.update {
@@ -455,6 +516,40 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 }
             }
         }
+    }
+
+    private suspend fun enterMfaEnrollment(emailAlreadyChecked: Boolean) {
+        val emailVerified = if (emailAlreadyChecked) {
+            _uiState.value.mfaEmailVerified
+        } else {
+            runCatching { mfaAuthRepository.reloadAndIsEmailVerified() }.getOrDefault(false)
+        }
+        if (!emailVerified) {
+            runCatching { mfaAuthRepository.sendEmailVerificationForMfa() }
+        }
+        _uiState.update {
+            it.copy(
+                hasCompletedInitialProfile = it.hasCompletedInitialProfile,
+                isNewSignup = it.isNewSignup,
+                destination = AppDestination.MFA,
+                mfaMode = MfaUiMode.ENROLL,
+                mfaEmailAddress = mfaAuthRepository.currentEmail(),
+                mfaEmailVerified = emailVerified,
+                mfaResolvedPhoneE164 = appPrefs.pendingMfaPhoneE164.orEmpty()
+                    .ifBlank { it.mfaResolvedPhoneE164 },
+                mfaSmsSent = false,
+                mfaSmsFailed = false,
+                mfaSmsRateLimited = false,
+                mfaEditingPhone = false,
+                profileSaveError = null,
+                isSavingProfile = false,
+                isAuthLoading = false,
+                authError = null,
+                authNotice = null,
+                authPopupTitle = null,
+            )
+        }
+        resolveMfaEnrollmentPhone()
     }
 
     fun saveProfile(updatedUser: SpectRoomUser) {
@@ -859,63 +954,154 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun clearAuthError() {
-        _uiState.update { it.copy(authError = null, authNotice = null) }
+        _uiState.update { it.copy(authError = null, authNotice = null, authPopupTitle = null) }
     }
 
     fun resetPassword(email: String) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isAuthLoading = true, authError = null, authNotice = null) }
-            authRepository.resetPassword(email).onSuccess {
-                _uiState.update {
-                    it.copy(
-                        isAuthLoading = false,
-                        authNotice = getApplication<Application>()
-                            .getString(R.string.auth_reset_password_sent, email.trim()),
-                    )
-                }
-            }.onFailure { error ->
-                _uiState.update {
-                    it.copy(
-                        isAuthLoading = false,
-                        authError = error.message
-                            ?: getApplication<Application>().getString(R.string.auth_reset_password_error),
-                    )
-                }
-            }
+            // iOS shows the success alert locally and does not surface reset failures on the auth screen.
+            authRepository.resetPassword(email)
         }
     }
 
     fun signIn(email: String, password: String) {
         viewModelScope.launch {
+            val trimmedEmail = email.trim()
+            val trimmedPassword = password.trim()
+            if (trimmedEmail.isEmpty() || trimmedPassword.isEmpty()) {
+                _uiState.update {
+                    it.copy(
+                        isAuthLoading = false,
+                        authNotice = null,
+                        authError = nextCredentialsErrorMessage(),
+                    )
+                }
+                return@launch
+            }
+
             _uiState.update { it.copy(isAuthLoading = true, authError = null, authNotice = null) }
-            runCatching {
-                when (val result = mfaAuthRepository.signInWithPossibleMfa(email, password)) {
-                    is MfaSignInResult.Completed -> refreshSession()
-                    is MfaSignInResult.MfaRequired -> {
-                        val activity = activityProvider?.invoke()
-                            ?: error("Activity required for MFA")
-                        mfaAuthRepository.sendSignInMfaCode(activity)
-                        _uiState.update {
-                            it.copy(
-                                isAuthLoading = false,
-                                destination = AppDestination.MFA,
-                                mfaMode = MfaUiMode.SIGN_IN,
-                                mfaMaskedPhone = result.maskedPhone,
-                            )
-                        }
+            val signInResult = runCatching {
+                mfaAuthRepository.signInWithPossibleMfa(trimmedEmail, trimmedPassword)
+            }.getOrElse { error ->
+                handleSignInFailure(error)
+                return@launch
+            }
+            when (signInResult) {
+                is MfaSignInResult.Completed -> {
+                    appPrefs.failedSignInAttempts = 0
+                    runCatching { refreshSession() }.onFailure { error ->
+                        handleSessionRefreshFailure(error)
                     }
                 }
-            }.onFailure { error ->
-                _uiState.update {
-                    it.copy(isAuthLoading = false, authError = error.message ?: "Sign-in failed")
+                is MfaSignInResult.MfaRequired -> {
+                    // Password was correct — always show MFA, never "invalid credentials".
+                    appPrefs.failedSignInAttempts = 0
+                    _uiState.update {
+                        it.copy(
+                            isAuthLoading = false,
+                            destination = AppDestination.MFA,
+                            mfaMode = MfaUiMode.SIGN_IN,
+                            mfaMaskedPhone = signInResult.maskedPhone,
+                            mfaSmsSent = false,
+                            mfaSmsFailed = false,
+                            mfaSmsRateLimited = false,
+                            authError = null,
+                            authNotice = null,
+                            authPopupTitle = null,
+                        )
+                    }
+                    sendMfaCode(null)
                 }
             }
         }
     }
 
+    private fun nextCredentialsErrorMessage(): String {
+        val attempts = appPrefs.failedSignInAttempts + 1
+        appPrefs.failedSignInAttempts = attempts
+        val app = getApplication<Application>()
+        return if (attempts % 5 == 0) {
+            app.getString(R.string.auth_error_credentials_with_forgot)
+        } else {
+            app.getString(R.string.auth_error_credentials)
+        }
+    }
+
+    private fun isInvalidCredentialsError(error: Throwable): Boolean {
+        if (error is FirebaseAuthInvalidCredentialsException) return true
+        val code = (error as? FirebaseAuthException)?.errorCode.orEmpty()
+        if (code.equals("ERROR_INVALID_CREDENTIAL", ignoreCase = true)) return true
+        if (code.equals("ERROR_USER_NOT_FOUND", ignoreCase = true)) return true
+        if (code.equals("ERROR_WRONG_PASSWORD", ignoreCase = true)) return true
+        val lower = error.message.orEmpty().lowercase()
+        return lower.contains("wrong password") ||
+            lower.contains("no user record") ||
+            (lower.contains("invalid") && lower.contains("credential"))
+    }
+
+    private fun handleSignInFailure(error: Throwable) {
+        val message = error.message.orEmpty()
+        val lower = message.lowercase()
+        val app = getApplication<Application>()
+        // Soft-deleted accounts must look like invalid credentials (iOS parity).
+        val softPendingDeletion = lower.contains("recently deleted")
+        val adminDeleted = lower.contains("account has been deleted") && !softPendingDeletion
+        when {
+            adminDeleted -> {
+                _moderationNotice.value = ModerationNotice.LoginDeleted
+                _uiState.update { it.copy(isAuthLoading = false, authError = null, authNotice = null) }
+            }
+            softPendingDeletion || isInvalidCredentialsError(error) -> {
+                _uiState.update {
+                    it.copy(
+                        isAuthLoading = false,
+                        authNotice = null,
+                        authError = nextCredentialsErrorMessage(),
+                    )
+                }
+            }
+            mfaAuthRepository.hasPendingSignIn -> {
+                _uiState.update {
+                    it.copy(
+                        isAuthLoading = false,
+                        destination = AppDestination.MFA,
+                        mfaMode = MfaUiMode.SIGN_IN,
+                        authError = null,
+                        authNotice = null,
+                        authPopupTitle = null,
+                    )
+                }
+                sendMfaCode(null)
+            }
+            else -> {
+                _uiState.update {
+                    it.copy(
+                        isAuthLoading = false,
+                        authNotice = null,
+                        authError = message.ifBlank { app.getString(R.string.auth_error_generic) },
+                        authPopupTitle = app.getString(R.string.auth_notice),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun handleSessionRefreshFailure(error: Throwable) {
+        val app = getApplication<Application>()
+        val message = error.message.orEmpty()
+        _uiState.update {
+            it.copy(
+                isAuthLoading = false,
+                authNotice = null,
+                authError = message.ifBlank { app.getString(R.string.auth_error_generic) },
+                authPopupTitle = app.getString(R.string.auth_notice),
+            )
+        }
+    }
+
     fun confirmMfa(code: String) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isAuthLoading = true, authError = null) }
+            _uiState.update { it.copy(isAuthLoading = true, authError = null, authPopupTitle = null) }
             runCatching {
                 when (_uiState.value.mfaMode) {
                     MfaUiMode.SIGN_IN -> mfaAuthRepository.confirmSignInMfa(code)
@@ -924,14 +1110,33 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 appPrefs.pendingMfaPhoneE164 = null
                 refreshSession()
             }.onFailure { error ->
+                val app = getApplication<Application>()
+                val mapped = mapMfaConfirmError(error, app)
                 _uiState.update {
                     it.copy(
                         isAuthLoading = false,
-                        authError = error.message ?: "Verification failed",
+                        authError = mapped,
+                        authPopupTitle = null,
                         mfaSmsRateLimited = mfaAuthRepository.isRateLimited(error),
                     )
                 }
             }
+        }
+    }
+
+    private fun mapMfaConfirmError(error: Throwable, app: Application): String {
+        val message = error.message.orEmpty().lowercase()
+        val code = (error as? com.google.firebase.auth.FirebaseAuthException)?.errorCode.orEmpty()
+        return when {
+            code.contains("INVALID_VERIFICATION_CODE", ignoreCase = true) ||
+                code.contains("MISSING_VERIFICATION_CODE", ignoreCase = true) ||
+                message.contains("invalid verification code") ||
+                message.contains("invalid code") ->
+                app.getString(R.string.mfa_error_invalid_code)
+            code.contains("SESSION_EXPIRED", ignoreCase = true) ||
+                message.contains("session") && message.contains("expir") ->
+                app.getString(R.string.mfa_error_session)
+            else -> error.message ?: app.getString(R.string.mfa_error_invalid_code)
         }
     }
 
@@ -941,6 +1146,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 it.copy(
                     isAuthLoading = true,
                     authError = null,
+                    authPopupTitle = null,
                     mfaSmsFailed = false,
                     mfaSmsRateLimited = false,
                 )
@@ -948,14 +1154,25 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             runCatching {
                 val activity = activityProvider?.invoke() ?: error("Activity required for MFA")
                 when (_uiState.value.mfaMode) {
-                    MfaUiMode.SIGN_IN -> mfaAuthRepository.sendSignInMfaCode(activity)
+                    MfaUiMode.SIGN_IN -> {
+                        mfaAuthRepository.sendSignInMfaCode(activity)
+                        _uiState.update {
+                            it.copy(
+                                mfaSmsSent = true,
+                                mfaSmsFailed = false,
+                                mfaSmsRateLimited = false,
+                            )
+                        }
+                    }
                     MfaUiMode.ENROLL -> {
                         if (!_uiState.value.mfaEmailVerified) {
-                            error("Verify your email before enabling SMS MFA")
+                            error(getApplication<Application>().getString(R.string.mfa_error_email_unverified))
                         }
                         val phone = phoneE164?.trim().orEmpty()
                             .ifBlank { _uiState.value.mfaResolvedPhoneE164 }
-                        require(phone.startsWith("+") && phone.length >= 10) { "Enter a valid E.164 phone" }
+                        require(phone.startsWith("+") && phone.length >= 10) {
+                            getApplication<Application>().getString(R.string.auth_error_phone_invalid)
+                        }
                         mfaAuthRepository.startEnroll(activity, phone)
                         appPrefs.pendingMfaPhoneE164 = phone
                         _uiState.update {
@@ -969,15 +1186,32 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                     }
                 }
             }.onFailure { error ->
-                _uiState.update {
-                    it.copy(
-                        authError = if (mfaAuthRepository.isRateLimited(error)) null else {
-                            error.message ?: "Could not send code"
-                        },
-                        mfaSmsFailed = _uiState.value.mfaMode == MfaUiMode.ENROLL,
-                        mfaSmsRateLimited = mfaAuthRepository.isRateLimited(error),
-                        mfaSmsSent = false,
-                    )
+                val rateLimited = mfaAuthRepository.isRateLimited(error)
+                val emailUnverified = error.message.orEmpty().contains("email", ignoreCase = true) &&
+                    error.message.orEmpty().contains("verif", ignoreCase = true)
+                android.util.Log.e("MFA", "sendMfaCode failed", error)
+                if (emailUnverified && _uiState.value.mfaMode == MfaUiMode.ENROLL) {
+                    _uiState.update {
+                        it.copy(
+                            mfaEmailVerified = false,
+                            mfaSmsFailed = false,
+                            mfaSmsRateLimited = false,
+                            mfaSmsSent = false,
+                            authError = null,
+                        )
+                    }
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            // Keep a dismissible popup with the real reason (emulator / SHA / test number).
+                            authError = error.message
+                                ?: getApplication<Application>().getString(R.string.mfa_error_send),
+                            authPopupTitle = getApplication<Application>().getString(R.string.auth_notice),
+                            mfaSmsFailed = _uiState.value.mfaMode == MfaUiMode.ENROLL,
+                            mfaSmsRateLimited = rateLimited,
+                            mfaSmsSent = false,
+                        )
+                    }
                 }
             }
             _uiState.update { it.copy(isAuthLoading = false) }
@@ -1004,9 +1238,11 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
 
     fun saveMissingMfaPhone(phoneE164: String) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isAuthLoading = true, authError = null) }
+            _uiState.update { it.copy(isAuthLoading = true, authError = null, authPopupTitle = null) }
             runCatching {
-                require(phoneE164.startsWith("+") && phoneE164.length >= 10)
+                require(phoneE164.startsWith("+") && phoneE164.length >= 10) {
+                    getApplication<Application>().getString(R.string.auth_error_phone_invalid)
+                }
                 mfaAuthRepository.savePendingPhone(phoneE164)
                 appPrefs.pendingMfaPhoneE164 = phoneE164
                 _uiState.update {
@@ -1019,7 +1255,11 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 }
             }.onFailure { error ->
                 _uiState.update {
-                    it.copy(authError = error.message ?: "Could not save phone")
+                    it.copy(
+                        authPopupTitle = getApplication<Application>().getString(R.string.auth_notice),
+                        authError = error.message
+                            ?: getApplication<Application>().getString(R.string.auth_error_phone_invalid),
+                    )
                 }
             }
             _uiState.update { it.copy(isAuthLoading = false) }
@@ -1028,9 +1268,11 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
 
     fun saveEditedMfaPhone(phoneE164: String) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isAuthLoading = true, authError = null, mfaEditingPhone = false) }
+            _uiState.update { it.copy(isAuthLoading = true, authError = null, authPopupTitle = null, mfaEditingPhone = false) }
             runCatching {
-                require(phoneE164.startsWith("+") && phoneE164.length >= 10)
+                require(phoneE164.startsWith("+") && phoneE164.length >= 10) {
+                    getApplication<Application>().getString(R.string.auth_error_phone_invalid)
+                }
                 mfaAuthRepository.savePendingPhone(phoneE164)
                 appPrefs.pendingMfaPhoneE164 = phoneE164
                 _uiState.update {
@@ -1046,7 +1288,9 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 _uiState.update {
                     it.copy(
                         isAuthLoading = false,
-                        authError = error.message ?: "Could not update phone",
+                        authPopupTitle = getApplication<Application>().getString(R.string.auth_notice),
+                        authError = error.message
+                            ?: getApplication<Application>().getString(R.string.auth_error_phone_invalid),
                     )
                 }
             }
@@ -1054,44 +1298,66 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun setMfaEditingPhone(editing: Boolean) {
-        _uiState.update { it.copy(mfaEditingPhone = editing, authError = null) }
+        _uiState.update { it.copy(mfaEditingPhone = editing, authError = null, authPopupTitle = null) }
     }
 
     fun sendMfaVerificationEmail() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isAuthLoading = true, authError = null) }
+            _uiState.update { it.copy(isAuthLoading = true, authError = null, authPopupTitle = null) }
             runCatching {
                 mfaAuthRepository.sendEmailVerificationForMfa()
+                val app = getApplication<Application>()
+                _uiState.update {
+                    it.copy(
+                        authPopupTitle = app.getString(R.string.mfa_email_sent_title),
+                        authError = app.getString(R.string.mfa_email_sent),
+                    )
+                }
             }.onFailure { error ->
                 _uiState.update {
-                    it.copy(authError = error.message ?: "Could not send verification email")
+                    it.copy(
+                        authPopupTitle = getApplication<Application>().getString(R.string.auth_notice),
+                        authError = error.message ?: "Could not send verification email",
+                    )
                 }
             }
             _uiState.update { it.copy(isAuthLoading = false) }
         }
     }
 
-    fun checkMfaEmailVerified() {
+    fun checkMfaEmailVerified(manual: Boolean = true) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isAuthLoading = true, authError = null) }
+            if (manual) {
+                _uiState.update { it.copy(isAuthLoading = true, authError = null, authPopupTitle = null) }
+            }
             runCatching {
                 val verified = mfaAuthRepository.reloadAndIsEmailVerified()
-                _uiState.update {
-                    it.copy(
-                        mfaEmailVerified = verified,
-                        authError = if (verified) {
-                            null
-                        } else {
-                            "Email not verified yet. Open the link we sent, then try again."
-                        },
-                    )
+                if (verified) {
+                    _uiState.update {
+                        it.copy(mfaEmailVerified = true, authError = null, authPopupTitle = null)
+                    }
+                } else if (manual) {
+                    _uiState.update {
+                        it.copy(
+                            authPopupTitle = null,
+                            authError = getApplication<Application>()
+                                .getString(R.string.mfa_error_email_unverified),
+                        )
+                    }
                 }
             }.onFailure { error ->
-                _uiState.update {
-                    it.copy(authError = error.message ?: "Could not check email verification")
+                if (manual) {
+                    _uiState.update {
+                        it.copy(
+                            authPopupTitle = getApplication<Application>().getString(R.string.auth_notice),
+                            authError = error.message ?: "Could not check email verification",
+                        )
+                    }
                 }
             }
-            _uiState.update { it.copy(isAuthLoading = false) }
+            if (manual) {
+                _uiState.update { it.copy(isAuthLoading = false) }
+            }
         }
     }
 
@@ -1106,6 +1372,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                         destination = AppDestination.AUTH,
                         isAuthLoading = false,
                         authError = null,
+                        authPopupTitle = null,
                         mfaMaskedPhone = "",
                         mfaEmailVerified = false,
                         mfaEmailAddress = "",
@@ -1118,18 +1385,19 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 }
                 return@launch
             }
-            val user = _uiState.value.currentUser
-            val profileComplete = user != null &&
-                ProfileCompletion.evaluate(user) == UserProfileStatus.COMPLETE
-            if (!profileComplete) {
-                authRepository.signOut()
-            }
+            // Enroll cancel = sign out & start over (iOS).
+            authRepository.signOut()
             appPrefs.pendingMfaPhoneE164 = null
+            val showOnboarding = !appPrefs.hasCompletedOnboarding
             _uiState.update {
                 it.copy(
-                    destination = if (profileComplete) AppDestination.MAIN else AppDestination.AUTH,
+                    isAuthenticated = false,
+                    currentUser = null,
+                    isNewSignup = false,
+                    destination = if (showOnboarding) AppDestination.ONBOARDING else AppDestination.AUTH,
                     isAuthLoading = false,
                     authError = null,
+                    authPopupTitle = null,
                     mfaMaskedPhone = "",
                     mfaEmailVerified = false,
                     mfaEmailAddress = "",
@@ -1145,25 +1413,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
 
     fun startMfaEnrollment() {
         viewModelScope.launch {
-            val verified = runCatching { mfaAuthRepository.reloadAndIsEmailVerified() }.getOrDefault(false)
-            _uiState.update {
-                it.copy(
-                    destination = AppDestination.MFA,
-                    mfaMode = MfaUiMode.ENROLL,
-                    authError = null,
-                    mfaEmailAddress = mfaAuthRepository.currentEmail(),
-                    mfaEmailVerified = verified,
-                    mfaResolvedPhoneE164 = "",
-                    mfaSmsSent = false,
-                    mfaSmsFailed = false,
-                    mfaSmsRateLimited = false,
-                    mfaEditingPhone = false,
-                )
-            }
-            if (!verified) {
-                runCatching { mfaAuthRepository.sendEmailVerificationForMfa() }
-            }
-            resolveMfaEnrollmentPhone()
+            enterMfaEnrollment(emailAlreadyChecked = false)
         }
     }
 
@@ -1195,11 +1445,37 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         if (_uiState.value.chatBlockedByPartner) return
         viewModelScope.launch {
             voiceMessageRepository.startRecording().onSuccess {
-                _uiState.update { it.copy(isRecordingVoice = true) }
+                _uiState.update {
+                    it.copy(
+                        isRecordingVoice = true,
+                        recordingDurationSeconds = 0.0,
+                        hasPendingVoicePreview = false,
+                        pendingVoicePreviewDuration = 0.0,
+                        pendingVoicePreviewPath = null,
+                    )
+                }
+                startVoiceRecordingTicker()
             }.onFailure {
                 _uiState.update { state -> state.copy(authError = it.message) }
             }
         }
+    }
+
+    private fun startVoiceRecordingTicker() {
+        voiceRecordingTickerJob?.cancel()
+        voiceRecordingTickerJob = viewModelScope.launch {
+            while (isActive && voiceMessageRepository.isRecording) {
+                _uiState.update {
+                    it.copy(recordingDurationSeconds = voiceMessageRepository.currentRecordingDurationSeconds())
+                }
+                delay(200)
+            }
+        }
+    }
+
+    private fun stopVoiceRecordingTicker() {
+        voiceRecordingTickerJob?.cancel()
+        voiceRecordingTickerJob = null
     }
 
     fun stopVoiceRecordingAndSend() {
@@ -1211,17 +1487,21 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             cancelVoiceRecording()
             return
         }
+        stopVoiceRecordingTicker()
         val recorded = voiceMessageRepository.stopRecording()
-        _uiState.update { it.copy(isRecordingVoice = false) }
+        _uiState.update { it.copy(isRecordingVoice = false, recordingDurationSeconds = 0.0) }
         if (recorded == null) return
         pendingVoiceFile = recorded.first
         pendingVoiceDuration = recorded.second
-        _uiState.update {
-            it.copy(
-                hasPendingVoicePreview = true,
-                pendingVoicePreviewDuration = recorded.second,
-                pendingVoicePreviewPath = recorded.first.absolutePath,
-            )
+        viewModelScope.launch {
+            delay(350)
+            _uiState.update {
+                it.copy(
+                    hasPendingVoicePreview = true,
+                    pendingVoicePreviewDuration = recorded.second,
+                    pendingVoicePreviewPath = recorded.first.absolutePath,
+                )
+            }
         }
     }
 
@@ -1269,15 +1549,21 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 hasPendingVoicePreview = false,
                 pendingVoicePreviewDuration = 0.0,
                 pendingVoicePreviewPath = null,
+                recordingDurationSeconds = 0.0,
             )
         }
     }
 
     fun cancelVoiceRecording() {
+        stopVoiceRecordingTicker()
         voiceMessageRepository.cancelRecording()
+        pendingVoiceFile?.delete()
+        pendingVoiceFile = null
+        pendingVoiceDuration = 0.0
         _uiState.update {
             it.copy(
                 isRecordingVoice = false,
+                recordingDurationSeconds = 0.0,
                 hasPendingVoicePreview = false,
                 pendingVoicePreviewDuration = 0.0,
                 pendingVoicePreviewPath = null,
@@ -1289,10 +1575,11 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         voiceMessageRepository.play(url)
     }
 
-    fun signUp(name: String, email: String, password: String) {
+    fun signUp(name: String, email: String, password: String, phoneE164: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(isAuthLoading = true, authError = null, authNotice = null) }
-            when (val result = authRepository.signUp(name, email, password)) {
+            appPrefs.pendingMfaPhoneE164 = phoneE164
+            when (val result = authRepository.signUp(name, email, password, phoneE164)) {
                 is AuthResult.Success -> {
                     val uid = authRepository.currentUid
                     if (!uid.isNullOrBlank()) {
@@ -1304,21 +1591,72 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                             hasCompletedInitialProfile = false,
                             isAuthLoading = false,
                             showingCompleteProfileWelcome = true,
+                            mfaResolvedPhoneE164 = phoneE164,
                         )
                     }
                     refreshSession()
                 }
-                is AuthResult.MfaRequired ->
+                is AuthResult.MfaRequired -> {
+                    appPrefs.pendingMfaPhoneE164 = null
                     _uiState.update { it.copy(isAuthLoading = false, authError = result.message) }
-                is AuthResult.Error ->
+                }
+                is AuthResult.Error -> {
+                    appPrefs.pendingMfaPhoneE164 = null
                     _uiState.update { it.copy(isAuthLoading = false, authError = result.message) }
-                is AuthResult.Banned ->
+                }
+                is AuthResult.Banned -> {
+                    appPrefs.pendingMfaPhoneE164 = null
                     _uiState.update { it.copy(isAuthLoading = false, authError = result.message) }
-                is AuthResult.Frozen ->
+                }
+                is AuthResult.Frozen -> {
+                    appPrefs.pendingMfaPhoneE164 = null
                     _uiState.update { it.copy(isAuthLoading = false, authError = result.message) }
-                is AuthResult.Deleted ->
+                }
+                is AuthResult.Deleted -> {
+                    appPrefs.pendingMfaPhoneE164 = null
                     _uiState.update { it.copy(isAuthLoading = false, authError = result.message) }
+                }
             }
+        }
+    }
+
+    fun resetAllAppState() {
+        viewModelScope.launch {
+            val accountKey = authRepository.accountKey
+            runCatching {
+                discoverRepository.deleteAllUserInteractions(messageRepository)
+            }
+            applyLocalAppResetAfterUserDataReset(accountKey)
+        }
+    }
+
+    private suspend fun applyLocalAppResetAfterUserDataReset(accountKey: String?) {
+        stopRealtime()
+        appPrefs.hasCompletedOnboarding = false
+        appPrefs.dontShowWelcomeAgain = false
+        dailyLimitStore.reset(accountKey)
+        distanceStore.resetToDefault(accountKey)
+        discoverDeckCache.clear(accountKey)
+        _discoverState.value = DiscoverUiState()
+        _socialState.value = SocialUiState()
+        _uiState.update {
+            it.copy(
+                isNewSignup = false,
+                hasCompletedInitialProfile = false,
+                currentUser = null,
+                showingMatchNotification = false,
+                newMatchProfile = null,
+                activeChatPartnerId = null,
+                activeChatPartnerName = null,
+                activeChatPartnerPhoto = null,
+                unreadMessagesCount = 0,
+            )
+        }
+        if (_uiState.value.isAuthenticated) {
+            refreshSession()
+            loadDiscoverDeck()
+            refreshSocial()
+            startRealtime()
         }
     }
 
@@ -1329,13 +1667,22 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             authRepository.signOut()
             _discoverState.value = DiscoverUiState()
             _socialState.value = SocialUiState()
+            if (!appPrefs.dontShowWelcomeAgain) {
+                appPrefs.hasCompletedOnboarding = false
+            }
+            val showOnboarding = !appPrefs.hasCompletedOnboarding
             _uiState.update {
                 it.copy(
                     isAuthenticated = false,
                     currentUser = null,
                     isAdmin = false,
                     isNewSignup = false,
-                    destination = AppDestination.AUTH,
+                    hasCompletedOnboarding = appPrefs.hasCompletedOnboarding,
+                    destination = if (showOnboarding) {
+                        AppDestination.ONBOARDING
+                    } else {
+                        AppDestination.AUTH
+                    },
                     selectedTab = 2,
                     activeChatPartnerId = null,
                 )
@@ -1431,13 +1778,20 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
     fun sendComposeMessage(text: String) {
         val profile = _uiState.value.composeMessageProfile ?: return
         val trimmed = text.trim()
-        if (trimmed.isEmpty()) return
+        val userId = profile.userId.trim()
+        if (trimmed.isEmpty() || userId.isEmpty()) return
+        val name = profile.name
+        val photo = profile.imageURL
         viewModelScope.launch {
-            runCatching { messageRepository.sendTextMessage(profile.userId, trimmed) }
-            _uiState.update { it.copy(composeMessageProfile = null) }
-            openChat(profile.userId, profile.name, profile.imageURL)
+            runCatching { messageRepository.sendTextMessage(userId, trimmed) }
+            delay(320)
+            openChat(userId, name, photo)
         }
     }
+
+    fun messagingUserId(): String? =
+        _uiState.value.currentUser?.firebaseDocumentId?.takeIf { it.isNotBlank() }
+            ?: authRepository.currentUid
 
     fun isMessagingBlocked(userId: String): Boolean {
         val user = _uiState.value.currentUser
@@ -1454,7 +1808,9 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
 
     /** Conversations visible in the list — excludes either-side blocks (parity with iOS). */
     fun visibleConversations(): List<ConversationDisplay> =
-        _socialState.value.conversations.filter { !isMessagingBlocked(it.otherUserId) }
+        _socialState.value.conversations
+            .filter { it.otherUserId.isNotBlank() && !isMessagingBlocked(it.otherUserId) }
+            .distinctBy { it.id }
 
     fun searchMessageHistory(query: String) {
         messageSearchJob?.cancel()
@@ -1558,17 +1914,21 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         appPrefs.messagesTabActive = true
         appPrefs.openConversationUserId = partnerId
         localNotifications.cancelMessageNotification(partnerId)
+        resetChatSoundBaseline()
         viewModelScope.launch {
             _socialState.update {
                 it.copy(
                     chatMessages = emptyList(),
                     chatHasMoreOlder = false,
                     isLoadingChatMessages = true,
+                    chatImageLocalPreviews = emptyMap(),
+                    uploadingImageContentKey = null,
                 )
             }
             runCatching { authRepository.updateMessagesTabActive(true) }
             runCatching { authRepository.updateOpenConversation(partnerId) }
             loadChatMessages(partnerId)
+            establishChatSoundBaseline()
             runCatching { messageRepository.markMessagesAsRead(partnerId) }
             refreshConversations()
             val blocked = runCatching { moderationRepository.isBlockedBy(partnerId) }.getOrDefault(false)
@@ -1586,6 +1946,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
 
     fun closeChat() {
         stopChatAutoRefresh()
+        resetChatSoundBaseline()
         _uiState.update {
             it.copy(
                 activeChatPartnerId = null,
@@ -1602,6 +1963,8 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 chatMessages = emptyList(),
                 chatHasMoreOlder = false,
                 isLoadingChatMessages = false,
+                chatImageLocalPreviews = emptyMap(),
+                uploadingImageContentKey = null,
             )
         }
         viewModelScope.launch {
@@ -1634,7 +1997,54 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         val name = state.newMessageSenderName.ifBlank { "Match" }
         val photo = state.newMessageSenderPhoto
         dismissNewMessageNotification()
+        suppressIncomingMessageSoundBriefly()
         openChat(senderId, name, photo)
+    }
+
+    /** Avoid replaying the chime when a notification/deep-link opens the chat. */
+    fun suppressIncomingMessageSoundBriefly() {
+        suppressIncomingMessageSoundUntil = System.currentTimeMillis() + 3_000L
+    }
+
+    private fun handleNewIncomingChatMessages(messages: List<MessageDisplay>) {
+        if (messages.isEmpty()) return
+        val incomingImages = messages.filter { it.messageType == MessageType.IMAGE }
+        if (incomingImages.isNotEmpty()) {
+            pendingIncomingImageSoundKeys.addAll(incomingImages.map { it.deduplicationKey })
+        }
+        if (messages.any { it.messageType != MessageType.IMAGE }) {
+            playIncomingMessageChime()
+        }
+    }
+
+    fun onIncomingChatImageDisplayed(deduplicationKey: String) {
+        if (deduplicationKey.isBlank()) return
+        if (!pendingIncomingImageSoundKeys.remove(deduplicationKey)) return
+        playIncomingMessageChime()
+    }
+
+    private fun playIncomingMessageChime() {
+        if (System.currentTimeMillis() < suppressIncomingMessageSoundUntil) return
+        if (!_uiState.value.soundEnabled || !isAppInForeground) return
+        val now = System.currentTimeMillis()
+        if (now - lastChimeAtMs < 400L) return
+        lastChimeAtMs = now
+        viewModelScope.launch(Dispatchers.Main.immediate) {
+            soundService.playNewMessageSound()
+        }
+    }
+
+    private fun isFromCurrentUser(senderId: String): Boolean {
+        if (senderId.isBlank()) return false
+        val myId = messagingUserId() ?: authRepository.currentUid ?: return false
+        return senderId == myId
+    }
+
+    private fun playIncomingMessageSoundIfNeeded(messageId: String, senderId: String) {
+        if (messageId.isBlank() || messageId == lastPlayedMessageSoundId) return
+        if (isFromCurrentUser(senderId)) return
+        lastPlayedMessageSoundId = messageId
+        playIncomingMessageChime()
     }
 
     fun updateEnergyLevel(level: Int) {
@@ -1653,7 +2063,8 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
 
     fun sendChatMessage(text: String) {
         if (_uiState.value.chatBlockedByPartner) return
-        val partnerId = _uiState.value.activeChatPartnerId ?: return
+        val partnerId = _uiState.value.activeChatPartnerId?.trim().orEmpty()
+        if (partnerId.isEmpty()) return
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
@@ -1668,15 +2079,69 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
     fun sendChatImage(uri: Uri) {
         if (_uiState.value.chatBlockedByPartner) return
         val partnerId = _uiState.value.activeChatPartnerId ?: return
+        val currentUserId = messagingUserId() ?: return
+        val partnerName = _uiState.value.activeChatPartnerName.orEmpty()
+        val myPhoto = _uiState.value.currentUser?.profilePhotoURL
+        val partnerPhoto = _uiState.value.activeChatPartnerPhoto
+        val pendingContent = "$PENDING_IMAGE_PREFIX${UUID.randomUUID()}"
+        val optimistic = MessageDisplay(
+            id = pendingContent,
+            content = pendingContent,
+            messageType = MessageType.IMAGE,
+            senderName = "You",
+            recipientName = partnerName,
+            senderId = currentUserId,
+            recipientId = partnerId,
+            createdAt = Date(),
+            isRead = true,
+            senderProfilePhotoURL = myPhoto,
+            recipientProfilePhotoURL = partnerPhoto,
+        )
+        _socialState.update { state ->
+            state.copy(
+                chatMessages = (state.chatMessages + optimistic).sortedBy { it.createdAt.time },
+                chatImageLocalPreviews = state.chatImageLocalPreviews + (pendingContent to uri.toString()),
+                uploadingImageContentKey = pendingContent,
+                isSendingMessage = true,
+            )
+        }
         viewModelScope.launch {
-            _socialState.update { it.copy(isSendingMessage = true, isUploadingPhoto = true) }
-            runCatching {
+            val result = runCatching {
                 val url = photoStorageRepository.uploadMessageImage(uri)
-                messageRepository.sendImageMessage(partnerId, url)
+                val messageId = messageRepository.sendImageMessage(partnerId, url)
+                url to messageId
             }
-            loadChatMessages(partnerId)
-            refreshConversations()
-            _socialState.update { it.copy(isSendingMessage = false, isUploadingPhoto = false) }
+            if (result.isSuccess) {
+                val (url, messageId) = result.getOrThrow()
+                _socialState.update { state ->
+                    val updatedMessages = state.chatMessages.map { message ->
+                        if (message.content == pendingContent) {
+                            message.copy(id = messageId, content = url)
+                        } else {
+                            message
+                        }
+                    }
+                    val previews = state.chatImageLocalPreviews.toMutableMap()
+                    previews.remove(pendingContent)
+                    previews[url] = uri.toString()
+                    state.copy(
+                        chatMessages = updatedMessages,
+                        chatImageLocalPreviews = previews,
+                        uploadingImageContentKey = null,
+                        isSendingMessage = false,
+                    )
+                }
+                refreshConversations()
+            } else {
+                _socialState.update { state ->
+                    state.copy(
+                        chatMessages = state.chatMessages.filterNot { it.content == pendingContent },
+                        chatImageLocalPreviews = state.chatImageLocalPreviews - pendingContent,
+                        uploadingImageContentKey = null,
+                        isSendingMessage = false,
+                    )
+                }
+            }
         }
     }
 
@@ -1783,28 +2248,132 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(pendingBlockProfile = null) }
     }
 
+    fun completeBlockConfirmation() {
+        val blockedId = _uiState.value.pendingBlockProfile?.userId
+        val shouldAnimateBlockPass = blockedId != null &&
+            _discoverState.value.blockPassUserId == blockedId
+        _uiState.update { state ->
+            state.copy(
+                pendingBlockProfile = null,
+                viewingProfile = if (state.viewingProfile?.userId == blockedId) {
+                    null
+                } else {
+                    state.viewingProfile
+                },
+            )
+        }
+        if (shouldAnimateBlockPass) {
+            viewModelScope.launch {
+                delay(50)
+                requestProgrammaticSwipe(SwipeType.PASS)
+            }
+        }
+    }
+
     fun confirmBlockOnly() {
         val profile = _uiState.value.pendingBlockProfile ?: return
         viewModelScope.launch {
             runCatching { moderationRepository.blockUser(profile.userId, profile.name) }
             if (_uiState.value.activeChatPartnerId == profile.userId) closeChat()
-            if (_uiState.value.viewingProfile?.userId == profile.userId) closeProfileDetail()
-            loadDiscoverDeck()
+            addBlockedUserLocally(profile.userId, profile.name)
+            refreshBlockLists()
+            val discover = _discoverState.value
+            val isTopDiscoverCard = discover.profiles.getOrNull(discover.currentIndex)?.userId == profile.userId
+            if (isTopDiscoverCard) {
+                _discoverState.update { it.copy(blockPassUserId = profile.userId) }
+            } else {
+                removeHiddenBlockedProfilesFromDeck(setOf(profile.userId))
+            }
             refreshSocial()
         }
     }
 
     fun confirmBlockAndReport() {
         val profile = _uiState.value.pendingBlockProfile ?: return
+        if (_uiState.value.activeChatPartnerId == profile.userId) closeChat()
+        addBlockedUserLocally(profile.userId, profile.name)
+        val discover = _discoverState.value
+        val isTopDiscoverCard = discover.profiles.getOrNull(discover.currentIndex)?.userId == profile.userId
+        if (isTopDiscoverCard) {
+            _discoverState.update { it.copy(blockPassUserId = profile.userId) }
+        } else {
+            removeHiddenBlockedProfilesFromDeck(setOf(profile.userId))
+        }
+        _uiState.update { it.copy(pendingBlockProfile = null) }
+        _reportAfterBlock.value = true
+        _reportTarget.value = profile
         viewModelScope.launch {
             runCatching { moderationRepository.blockUser(profile.userId, profile.name) }
-            if (_uiState.value.activeChatPartnerId == profile.userId) closeChat()
-            closeProfileDetail()
-            _uiState.update { it.copy(pendingBlockProfile = null) }
-            loadDiscoverDeck()
+            refreshBlockLists()
             refreshSocial()
-            showReport(profile)
         }
+    }
+
+    fun requestProgrammaticSwipe(action: SwipeType) {
+        _discoverState.update { it.copy(programmaticSwipe = action) }
+    }
+
+    fun onProgrammaticSwipeComplete(action: SwipeType) {
+        val blockUserId = _discoverState.value.blockPassUserId
+        _discoverState.update { it.copy(programmaticSwipe = null) }
+        if (action == SwipeType.PASS && blockUserId != null) {
+            completeBlockPass(blockUserId)
+        } else {
+            swipe(action)
+        }
+    }
+
+    private fun addBlockedUserLocally(userId: String, name: String) {
+        val blocked = BlockedUser(id = userId, name = name, blockedAt = java.util.Date())
+        _socialState.update { state ->
+            if (state.blockedUsers.any { it.id == userId }) state
+            else state.copy(blockedUsers = state.blockedUsers + blocked)
+        }
+        _uiState.update { state ->
+            val user = state.currentUser ?: return@update state
+            if (user.blockedUsers.any { it.id == userId }) return@update state
+            state.copy(currentUser = user.copy(blockedUsers = user.blockedUsers + blocked))
+        }
+    }
+
+    private fun removeHiddenBlockedProfilesFromDeck(blockedIds: Set<String>) {
+        if (blockedIds.isEmpty()) return
+        _discoverState.update { state ->
+            val topId = state.profiles.getOrNull(state.currentIndex)?.userId
+            if (topId != null && topId in blockedIds) return@update state
+            val kept = state.profiles.filterIndexed { index, card ->
+                !(index > state.currentIndex && card.userId in blockedIds)
+            }
+            if (kept.size == state.profiles.size) state else state.copy(profiles = kept)
+        }
+        persistDiscoverDeckCache()
+        prefetchMoreProfilesIfNeeded()
+    }
+
+    private fun completeBlockPass(userId: String) {
+        val state = _discoverState.value
+        if (state.profiles.getOrNull(state.currentIndex)?.userId != userId) {
+            _discoverState.update { it.copy(blockPassUserId = null) }
+            return
+        }
+        val blockedIds = _socialState.value.blockedUsers.map { it.id }.toSet() + userId
+        val nextIndex = state.currentIndex + 1
+        _discoverState.update {
+            val kept = it.profiles.filterIndexed { index, card ->
+                !(index > it.currentIndex && card.userId in blockedIds)
+            }
+            it.copy(
+                profiles = kept,
+                currentIndex = nextIndex.coerceAtMost(kept.size),
+                blockPassUserId = null,
+                canUndo = false,
+                lastSwipedProfile = null,
+                lastSwipeType = null,
+                lastSwipeCountedTowardLimit = false,
+            )
+        }
+        persistDiscoverDeckCache()
+        prefetchMoreProfilesIfNeeded()
     }
 
     fun showAddressSearch() {
@@ -1868,27 +2437,69 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
 
     fun hideReport() {
         _reportTarget.value = null
+        _reportAfterBlock.value = false
     }
 
     fun submitReport(category: String) {
+        submitReport(category, details = null)
+    }
+
+    fun submitReport(category: String, details: String?) {
         val target = _reportTarget.value ?: return
         viewModelScope.launch {
             runCatching {
-                val recent = runCatching {
-                    messageRepository.fetchConversationMessages(target.userId)
-                }.getOrDefault(emptyList())
-                moderationRepository.submitReport(
-                    reportedUserId = target.userId,
-                    reportedName = target.name,
-                    category = category,
-                    details = null,
-                    bio = target.bio,
-                    photoUrls = listOfNotNull(target.imageURL) + target.photos,
-                    recentMessages = recent,
-                )
+                submitReportForProfile(target, category, details)
             }
             hideReport()
         }
+    }
+
+    fun submitBlockReport(
+        reason: ProfileReportReason,
+        details: String?,
+    ) {
+        val target = _uiState.value.viewingProfile ?: _reportTarget.value ?: return
+        _reportTarget.value = null
+        _reportAfterBlock.value = false
+        viewModelScope.launch {
+            runCatching {
+                submitReportForProfile(target, reason.storageCategory, details)
+            }
+            _showReportThankYou.value = true
+        }
+    }
+
+    fun finishBlockReportFlow() {
+        val blockedId = _discoverState.value.blockPassUserId
+        _showReportThankYou.value = false
+        _reportTarget.value = null
+        _reportAfterBlock.value = false
+        _uiState.update { it.copy(viewingProfile = null) }
+        if (blockedId != null) {
+            viewModelScope.launch {
+                delay(50)
+                requestProgrammaticSwipe(SwipeType.PASS)
+            }
+        }
+    }
+
+    private suspend fun submitReportForProfile(
+        target: ProfileCard,
+        category: String,
+        details: String?,
+    ) {
+        val recent = runCatching {
+            messageRepository.fetchConversationMessages(target.userId)
+        }.getOrDefault(emptyList())
+        moderationRepository.submitReport(
+            reportedUserId = target.userId,
+            reportedName = target.name,
+            category = category,
+            details = details,
+            bio = target.bio,
+            photoUrls = listOfNotNull(target.imageURL) + target.photos,
+            recentMessages = recent,
+        )
     }
 
     fun loadDiscoverDeck(ignorePassedFilter: Boolean = false) {
@@ -2067,6 +2678,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         private const val PREFETCH_REMAINING_THRESHOLD = 4
         private const val PREFETCH_BATCH_SIZE = 20
         private const val CHAT_AUTO_REFRESH_INTERVAL_MS = 10_000L
+        private const val PENDING_IMAGE_PREFIX = "pending://"
     }
 
     fun swipe(action: SwipeType) {
@@ -2336,9 +2948,9 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         val merged = (currentMessages + uniqueNew).sortedBy { it.createdAt.time }
         _socialState.update { it.copy(chatMessages = merged) }
 
-        val currentUserId = _uiState.value.currentUser?.firebaseDocumentId
-        val hasNewIncoming = uniqueNew.any { it.senderId != currentUserId }
+        val hasNewIncoming = uniqueNew.any { it.senderId == partnerId }
         if (hasNewIncoming) {
+            handleNewIncomingChatMessages(uniqueNew.filter { it.senderId == partnerId })
             runCatching { messageRepository.markMessagesAsRead(partnerId) }
             refreshConversations()
         }
@@ -2346,7 +2958,6 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
 
     private fun startRealtime() {
         stopRealtime()
-        hasPrimedIncomingListener = false
         val matchesJob = viewModelScope.launch {
             matchRepository.observeRecentMatches { _uiState.value.currentUser }.collect { match ->
                 refreshMatches()
@@ -2359,25 +2970,22 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             }
         }
         val messagesJob = viewModelScope.launch {
-            messageRepository.observeIncomingMessageEvents().collect { hint ->
-                if (!hasPrimedIncomingListener) {
-                    hasPrimedIncomingListener = true
-                    return@collect
-                }
-                if (hint == null) return@collect
-                if (isMessagingBlocked(hint.senderId)) return@collect
+            messageRepository.observeIncomingMessageEvents().collect { event ->
+                val hint = event ?: return@collect
+                if (isMessagingBlocked(hint.senderId) || isFromCurrentUser(hint.senderId)) return@collect
                 refreshConversations()
                 val state = _uiState.value
                 val openPartnerId = state.activeChatPartnerId
-                if (openPartnerId == hint.senderId) {
+                val chatIsOpenWithSender = openPartnerId == hint.senderId
+                if (chatIsOpenWithSender && openPartnerId != null) {
                     refreshChatMessagesInBackground(openPartnerId)
                     localNotifications.cancelMessageNotification(hint.senderId)
                     return@collect
                 }
-                val onMessagesTab = state.selectedTab == 0
-                if (state.soundEnabled && !onMessagesTab && isAppInForeground) {
-                    soundService.playNewMessageSound()
+                if (isAppInForeground) {
+                    playIncomingMessageSoundIfNeeded(hint.messageDocId, hint.senderId)
                 }
+                val onMessagesTab = state.selectedTab == 0
                 val fromConversation = _socialState.value.conversations
                     .firstOrNull { it.otherUserId == hint.senderId }
                 val (resolvedName, resolvedPhoto) = if (fromConversation != null) {
@@ -2437,7 +3045,8 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                         currentUser = null,
                         destination = AppDestination.AUTH,
                         isAuthLoading = false,
-                        authError = getApplication<Application>().getString(R.string.auth_error_account_banned),
+                        authError = null,
+                        authNotice = null,
                     )
                 }
                 return
@@ -2445,16 +3054,14 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             is AccessGate.Frozen -> {
                 authRepository.signOut()
                 _moderationNotice.value = ModerationNotice.LoginBlocked(gate.until)
-                val unlock = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
-                    .format(gate.until)
                 _uiState.update {
                     it.copy(
                         isAuthenticated = false,
                         currentUser = null,
                         destination = AppDestination.AUTH,
                         isAuthLoading = false,
-                        authError = getApplication<Application>()
-                            .getString(R.string.auth_error_account_frozen, unlock),
+                        authError = null,
+                        authNotice = null,
                     )
                 }
                 return
@@ -2468,7 +3075,8 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                         currentUser = null,
                         destination = AppDestination.AUTH,
                         isAuthLoading = false,
-                        authError = getApplication<Application>().getString(R.string.auth_error_account_deleted),
+                        authError = null,
+                        authNotice = null,
                     )
                 }
                 return
@@ -2483,6 +3091,21 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 firebaseDocumentId = authRepository.currentUid,
             )
         val complete = ProfileCompletion.evaluate(profile) == UserProfileStatus.COMPLETE
+        val needsMfa = !mfaAuthRepository.isMfaEnrolledOrBypassed()
+        // iOS: MFA enrollment before mandatory profile.
+        if (needsMfa) {
+            _uiState.update {
+                it.copy(
+                    isAuthenticated = true,
+                    currentUser = profile,
+                    isAdmin = adminRepository.isCurrentUserAdmin(),
+                    hasCompletedInitialProfile = complete || it.hasCompletedInitialProfile,
+                    isNewSignup = it.isNewSignup || !complete,
+                )
+            }
+            enterMfaEnrollment(emailAlreadyChecked = false)
+            return
+        }
         val destination = when {
             _uiState.value.isNewSignup && !complete -> AppDestination.MANDATORY_PROFILE
             !complete && !_uiState.value.hasCompletedInitialProfile -> AppDestination.MANDATORY_PROFILE
@@ -2497,6 +3120,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 destination = destination,
                 isAuthLoading = false,
                 authError = null,
+                authPopupTitle = null,
                 showingCompleteProfileWelcome = destination == AppDestination.MANDATORY_PROFILE &&
                     appPrefs.shouldShowCompleteProfileWelcome(profile.firebaseDocumentId),
             )

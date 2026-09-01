@@ -70,6 +70,31 @@ object PreferredAgeRangeLogic {
             currentMin to newMax
         }
     }
+
+    fun clampRange(min: Int, max: Int): Pair<Int, Int> {
+        var newMin = min.coerceIn(ABSOLUTE_MIN, ABSOLUTE_MAX)
+        var newMax = max.coerceIn(ABSOLUTE_MIN, ABSOLUTE_MAX)
+        if (newMin > newMax) {
+            val swapped = newMin
+            newMin = newMax
+            newMax = swapped
+        }
+        if (newMax - newMin > MAX_SPAN) {
+            newMax = minOf(ABSOLUTE_MAX, newMin + MAX_SPAN)
+        }
+        return newMin to newMax
+    }
+
+    fun initialRange(userAge: Int, savedMin: Int?, savedMax: Int?): Pair<Int, Int> {
+        val age = userAge.coerceIn(ABSOLUTE_MIN, ABSOLUTE_MAX)
+        val hasSaved = (savedMin ?: 0) > 0 && (savedMax ?: 0) > 0
+        val (min, max) = if (hasSaved) {
+            savedMin!! to savedMax!!
+        } else {
+            age to minOf(age + 5, ABSOLUTE_MAX)
+        }
+        return clampRange(min, max)
+    }
 }
 
 private enum class ActiveThumb { Min, Max }

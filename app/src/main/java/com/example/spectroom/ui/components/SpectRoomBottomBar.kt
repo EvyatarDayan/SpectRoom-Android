@@ -3,6 +3,7 @@ package com.example.spectroom.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,17 +36,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.PlatformTextStyle
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.example.spectroom.R
 import com.example.spectroom.ui.navigation.MainTab
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
-import com.example.spectroom.ui.theme.PassRed
 import com.example.spectroom.ui.theme.TabSelected
 
 private val BarTopCorner = 15.dp
@@ -152,7 +150,11 @@ fun SpectRoomBottomBar(
                     .clip(CircleShape)
                     .background(colors.card)
                     .border(1.dp, colors.floatingPillBorder, CircleShape)
-                    .clickable { onTabSelected(MainTab.HOME.index) },
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { onTabSelected(MainTab.HOME.index) },
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -179,7 +181,11 @@ private fun BottomTabItem(
     val tint = if (selected) TabSelected else colors.secondaryText
 
     Column(
-        modifier = modifier.clickable(onClick = onClick),
+        modifier = modifier.clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+            onClick = onClick,
+        ),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
@@ -191,7 +197,7 @@ private fun BottomTabItem(
                 modifier = Modifier.size(20.dp),
             )
             if (badgeCount > 0) {
-                TabBadge(count = badgeCount)
+                UnreadCountBadge(count = badgeCount)
             }
         }
         Text(
@@ -199,31 +205,6 @@ private fun BottomTabItem(
             color = tint,
             fontSize = 11.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-        )
-    }
-}
-
-@Composable
-private fun BoxScope.TabBadge(count: Int) {
-    val label = if (count > 9) "9+" else count.toString()
-    Box(
-        modifier = Modifier
-            .align(Alignment.TopEnd)
-            .offset(x = 6.dp, y = (-6).dp)
-            .size(18.dp)
-            .background(PassRed, CircleShape),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = label,
-            color = Color.White,
-            style = TextStyle(
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                lineHeight = 10.sp,
-                textAlign = TextAlign.Center,
-                platformStyle = PlatformTextStyle(includeFontPadding = false),
-            ),
         )
     }
 }

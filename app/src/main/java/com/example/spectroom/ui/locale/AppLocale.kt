@@ -3,6 +3,7 @@ package com.example.spectroom.ui.locale
 import android.content.Context
 import android.content.res.Configuration
 import android.os.LocaleList
+import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
@@ -29,6 +30,11 @@ fun ProvideAppLocale(
 ) {
     key(languageCode) {
         val baseContext = LocalContext.current
+        // Activity-result launchers resolve the owner from LocalContext when no explicit
+        // owner is provided. Keep the real Activity owner after swapping in a localized context.
+        val activityResultOwner = checkNotNull(LocalActivityResultRegistryOwner.current) {
+            "ProvideAppLocale must be used inside a ComponentActivity"
+        }
         val localizedContext = remember(baseContext, languageCode) {
             AppLocale.localizedContext(baseContext, languageCode)
         }
@@ -42,6 +48,7 @@ fun ProvideAppLocale(
             LocalContext provides localizedContext,
             LocalConfiguration provides configuration,
             LocalResources provides resources,
+            LocalActivityResultRegistryOwner provides activityResultOwner,
         ) {
             content()
         }

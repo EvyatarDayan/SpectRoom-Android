@@ -16,6 +16,15 @@ class AppPrefsStore(context: Context) {
         get() = prefs.getBoolean(KEY_ONBOARDING, false)
         set(value) = prefs.edit().putBoolean(KEY_ONBOARDING, value).apply()
 
+    /** When true, onboarding stays hidden after sign-out (iOS `dontShowWelcomeAgain`). */
+    var dontShowWelcomeAgain: Boolean
+        get() = prefs.getBoolean(KEY_DONT_SHOW_WELCOME, false)
+        set(value) = prefs.edit().putBoolean(KEY_DONT_SHOW_WELCOME, value).apply()
+
+    var failedSignInAttempts: Int
+        get() = prefs.getInt(KEY_FAILED_SIGN_IN, 0)
+        set(value) = prefs.edit().putInt(KEY_FAILED_SIGN_IN, value).apply()
+
     var languageCode: String
         get() = prefs.getString(KEY_LANGUAGE, "en") ?: "en"
         set(value) = prefs.edit().putString(KEY_LANGUAGE, value).apply()
@@ -114,6 +123,8 @@ class AppPrefsStore(context: Context) {
         private const val PREFS = "spectroom_app"
         private const val KEY_DARK = "isDarkMode"
         private const val KEY_ONBOARDING = "hasCompletedOnboarding"
+        private const val KEY_DONT_SHOW_WELCOME = "dontShowWelcomeAgain"
+        private const val KEY_FAILED_SIGN_IN = "failedSignInAttempts"
         private const val KEY_LANGUAGE = "selectedLanguage"
         private const val KEY_NOTIFICATIONS = "notificationsEnabled"
         private const val KEY_SOUND = "soundEnabled"

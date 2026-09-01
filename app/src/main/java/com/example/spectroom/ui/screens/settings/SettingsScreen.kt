@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Report
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -38,6 +39,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -79,10 +81,12 @@ fun SettingsScreen(
     isAdmin: Boolean = false,
     onAdmin: () -> Unit = {},
     onDeleteAccount: () -> Unit = {},
+    onResetUserData: () -> Unit = {},
     onSignOut: () -> Unit,
 ) {
     val colors = LocalSpectRoomColors.current
     val language = AppLanguage.fromCode(languageCode)
+    val isDebugBuild = (LocalContext.current.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
     Column(
         modifier = Modifier
@@ -232,6 +236,18 @@ fun SettingsScreen(
                     )
                 }
             }
+        }
+
+        if (isDebugBuild) {
+            SettingsCard {
+                SettingsNavigationRow(
+                    icon = Icons.Filled.RestartAlt,
+                    title = stringResource(R.string.settings_reset_user_data),
+                    subtitle = stringResource(R.string.settings_reset_user_data_description),
+                    onClick = onResetUserData,
+                )
+            }
+            Spacer(modifier = Modifier.height(20.dp))
         }
 
         Spacer(modifier = Modifier.height(12.dp))

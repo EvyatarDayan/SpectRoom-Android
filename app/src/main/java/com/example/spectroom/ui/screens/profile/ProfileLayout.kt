@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.res.stringResource
@@ -112,6 +113,34 @@ fun ProfilePillButton(
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 6.dp),
     )
+}
+
+@Composable
+fun ProfileCircleIconButton(
+    onClick: () -> Unit,
+    icon: ImageVector,
+    contentDescription: String,
+    iconTint: Color,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalSpectRoomColors.current
+    Box(
+        modifier = modifier
+            .size(36.dp)
+            .shadow(2.dp, CircleShape, clip = false)
+            .clip(CircleShape)
+            .border(1.dp, colors.border, CircleShape)
+            .background(colors.card)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = iconTint,
+            modifier = Modifier.size(22.dp),
+        )
+    }
 }
 
 @Composable

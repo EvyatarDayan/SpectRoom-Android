@@ -25,6 +25,11 @@ class VoiceMessageRepository(
 
     val isRecording: Boolean get() = recorder != null
 
+    fun currentRecordingDurationSeconds(): Double {
+        if (recorder == null || startedAtMs <= 0L) return 0.0
+        return ((System.currentTimeMillis() - startedAtMs) / 1000.0).coerceAtLeast(0.0)
+    }
+
     fun startRecording(): Result<Unit> = runCatching {
         stopPlayback()
         stopRecordingInternal(discard = true)
@@ -50,6 +55,10 @@ class VoiceMessageRepository(
 
     fun stopRecording(): Pair<File, Double>? {
         val file = outputFile ?: return null
+        if (recorder == null || startedAtMs <= 0L) {
+            stopRecordingInternal(discard = true)
+            return null
+        }
         val duration = ((System.currentTimeMillis() - startedAtMs) / 1000.0).coerceAtLeast(0.1)
         stopRecordingInternal(discard = false)
         return if (file.exists() && file.length() > 0) file to duration else null

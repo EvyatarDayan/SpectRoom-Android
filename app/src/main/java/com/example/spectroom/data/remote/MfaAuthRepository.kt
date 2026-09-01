@@ -41,6 +41,20 @@ class MfaAuthRepository(
     val isMfaEnrolled: Boolean
         get() = auth.currentUser?.multiFactor?.enrolledFactors?.isNotEmpty() == true
 
+    /** True when SMS MFA is enrolled in Auth, or Firestore marks a seeded/test account as ready. */
+    suspend fun isMfaEnrolledOrBypassed(): Boolean {
+        if (isMfaEnrolled) return true
+        val uid = auth.currentUser?.uid ?: return false
+        val snapshot = runCatching {
+            db.collection("users").document(uid).get().await()
+        }.getOrNull() ?: return false
+        return snapshot.getBoolean("mfaEnrolled") == true
+    }
+
+    /** True while email/password succeeded but SMS MFA sign-in is still pending. */
+    val hasPendingSignIn: Boolean
+        get() = pendingResolver != null
+
     suspend fun signInWithPossibleMfa(email: String, password: String): MfaSignInResult {
         val normalized = email.trim().lowercase()
         authRepository.ensureEmailAllowedForAuth(normalized)
@@ -61,6 +75,7 @@ class MfaAuthRepository(
     }
 
     suspend fun sendSignInMfaCode(activity: Activity) {
+        FirebasePhoneAuthDebug.applyIfNeeded(activity)
         val resolver = pendingResolver ?: error("MFA session expired")
         val hint = resolver.hints.filterIsInstance<PhoneMultiFactorInfo>().firstOrNull()
             ?: error("No phone MFA factor")
@@ -77,6 +92,7 @@ class MfaAuthRepository(
     }
 
     suspend fun startEnroll(activity: Activity, phoneE164: String) {
+        FirebasePhoneAuthDebug.applyIfNeeded(activity)
         val user = auth.currentUser ?: error("Not signed in")
         user.reload().await()
         if (!user.isEmailVerified) {

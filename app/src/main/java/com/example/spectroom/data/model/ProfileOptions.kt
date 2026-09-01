@@ -1,5 +1,9 @@
 package com.example.spectroom.data.model
 
+import androidx.annotation.DrawableRes
+import androidx.annotation.StringRes
+import com.example.spectroom.R
+
 enum class SensoryPreferenceOption(val rawValue: String, val title: String, val subtitle: String) {
     LOW_NOISE(
         "lowNoiseEnvironments",
@@ -77,12 +81,61 @@ enum class DiscoverDistanceOption(val level: Int, val maxKilometers: Double?) {
             UNLIMITED -> "∞"
         }
 
+    @StringRes
+    fun titleRes(): Int = when (this) {
+        FIVE_KM -> R.string.settings_distance_5km
+        TEN_KM -> R.string.settings_distance_10km
+        TWENTY_KM -> R.string.settings_distance_20km
+        FIFTY_KM -> R.string.settings_distance_50km
+        UNLIMITED -> R.string.settings_distance_unlimited
+    }
+
+    @DrawableRes
+    fun iconRes(): Int = when (this) {
+        UNLIMITED -> R.drawable.ic_world
+        else -> R.drawable.ic_radius
+    }
+
+    val illustrationBarWidthDp: Float?
+        get() = when (this) {
+            FIVE_KM -> 47f
+            TEN_KM -> 64f
+            TWENTY_KM -> 80f
+            FIFTY_KM -> 97f
+            UNLIMITED -> null
+        }
+
     companion object {
         val DEFAULT = TWENTY_KM
 
         fun fromLevel(level: Int): DiscoverDistanceOption =
             entries.firstOrNull { it.level == level } ?: DEFAULT
     }
+}
+
+object GenderPreferenceOption {
+    const val MAN = "Man"
+    const val WOMAN = "Woman"
+    const val NON_BINARY = "Non-binary"
+
+    val all = listOf(MAN, WOMAN, NON_BINARY)
+
+    fun normalizeInterestedIn(values: List<String>): List<String> {
+        val selected = linkedSetOf<String>()
+        var hadAnyone = false
+        for (value in values) {
+            when {
+                value.equals("Anyone", ignoreCase = true) -> hadAnyone = true
+                value.equals("Other", ignoreCase = true) -> selected.add(NON_BINARY)
+                else -> all.firstOrNull { it.equals(value, ignoreCase = true) }?.let(selected::add)
+            }
+        }
+        if (hadAnyone) selected.addAll(all)
+        return all.filter { it in selected }
+    }
+
+    fun hasValidInterestedIn(values: List<String>): Boolean =
+        normalizeInterestedIn(values).isNotEmpty()
 }
 
 enum class LookingForOption(val rawValue: String, val displayName: String) {
@@ -135,6 +188,13 @@ object EnergyLevel {
         else -> "Fully Social Mode"
     }
 
+    @StringRes
+    fun titleRes(level: Int): Int = when (resolve(level)) {
+        LOW -> R.string.profile_energy_low_battery
+        MODERATE -> R.string.profile_energy_moderate_social
+        else -> R.string.profile_energy_fully_social
+    }
+
     fun emoji(level: Int): String = when (resolve(level)) {
         LOW -> "🌙"
         MODERATE -> "⛅"
@@ -142,8 +202,15 @@ object EnergyLevel {
     }
 
     fun detail(level: Int): String = when (resolve(level)) {
-        LOW -> "Prefer quiet connection for now"
-        MODERATE -> "Open to hanging out at a calm pace"
-        else -> "Ready to meet and socialize"
+        LOW -> "Taking time to recharge. Slow to reply today."
+        MODERATE -> "Open to casual text chats at a steady pace."
+        else -> "High energy! Ready for fast chats, calls, or making plans."
+    }
+
+    @StringRes
+    fun detailRes(level: Int): Int = when (resolve(level)) {
+        LOW -> R.string.profile_energy_low_battery_detail
+        MODERATE -> R.string.profile_energy_moderate_social_detail
+        else -> R.string.profile_energy_fully_social_detail
     }
 }

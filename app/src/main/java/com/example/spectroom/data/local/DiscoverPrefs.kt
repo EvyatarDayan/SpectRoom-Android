@@ -59,13 +59,15 @@ class DiscoverDailyLimitStore(context: Context) {
             .apply()
     }
 
+    /** Clears today's swipe quota (mirrors iOS `DiscoverDailyLimit.reset()`). */
     fun reset(accountKey: String?) {
         if (accountKey.isNullOrBlank()) return
+        val today = todayKey()
         prefs.edit()
-            .remove(dateKey(accountKey))
-            .remove(countKey(accountKey))
-            .remove(secondThoughtsKey(accountKey))
-            .remove(secondThoughtsDateKey(accountKey))
+            .putString(dateKey(accountKey), today)
+            .putInt(countKey(accountKey), 0)
+            .putString(secondThoughtsDateKey(accountKey), today)
+            .putBoolean(secondThoughtsKey(accountKey), false)
             .apply()
     }
 
@@ -113,6 +115,11 @@ class DiscoverDistanceStore(context: Context) {
     fun setOption(accountKey: String?, option: DiscoverDistanceOption) {
         if (accountKey.isNullOrBlank()) return
         prefs.edit().putInt(levelKey(accountKey), option.level).apply()
+    }
+
+    fun resetToDefault(accountKey: String?) {
+        if (accountKey.isNullOrBlank()) return
+        prefs.edit().putInt(levelKey(accountKey), DiscoverDistanceOption.DEFAULT.level).apply()
     }
 
     private fun levelKey(accountKey: String) = "discoverMaxDistanceLevel_$accountKey"

@@ -22,7 +22,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Person
@@ -58,6 +57,7 @@ import coil3.compose.AsyncImage
 import com.example.spectroom.R
 import com.example.spectroom.data.model.ConversationDisplay
 import com.example.spectroom.ui.components.TabBarBodyHeight
+import com.example.spectroom.ui.components.UnreadCountBadge
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
 import com.example.spectroom.ui.theme.TabSelected
 import java.text.SimpleDateFormat
@@ -273,17 +273,20 @@ private fun MessagesEmptyView(
         Box(
             modifier = Modifier
                 .size(96.dp)
-                .shadow(12.dp, CircleShape, ambientColor = TabSelected.copy(0.16f))
+                .shadow(
+                    elevation = 12.dp,
+                    shape = CircleShape,
+                    ambientColor = TabSelected.copy(alpha = 0.16f),
+                    spotColor = TabSelected.copy(alpha = 0.16f),
+                )
                 .clip(CircleShape)
-                .background(TabSelected.copy(0.14f))
-                .border(1.dp, TabSelected.copy(0.18f), CircleShape),
+                .background(TabSelected.copy(alpha = 0.14f))
+                .border(1.dp, TabSelected.copy(alpha = 0.18f), CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                imageVector = Icons.Filled.ChatBubble,
-                contentDescription = null,
-                tint = TabSelected,
-                modifier = Modifier.size(40.dp),
+            Text(
+                text = "💬",
+                fontSize = 48.sp,
             )
         }
         Spacer(modifier = Modifier.height(12.dp))
@@ -449,20 +452,7 @@ private fun ConversationRow(
                 }
             }
             if (conversation.unreadCount > 0) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .offset(x = 6.dp, y = (-6).dp)
-                        .background(TabSelected, CircleShape)
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                ) {
-                    Text(
-                        text = if (conversation.unreadCount > 9) "9+" else conversation.unreadCount.toString(),
-                        color = Color.White,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
+                UnreadCountBadge(count = conversation.unreadCount)
             }
         }
 

@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
 import com.example.spectroom.R
+import com.example.spectroom.data.model.GenderPreferenceOption
 import com.example.spectroom.data.model.BodyTypeOption
 import com.example.spectroom.data.model.EnergyLevel
 import com.example.spectroom.data.model.IdealFirstDateOption
@@ -54,6 +55,7 @@ import com.example.spectroom.domain.ProfileCompletion
 import com.example.spectroom.domain.ProfileValidation
 import com.example.spectroom.domain.ProfileValidationSection
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
+import com.example.spectroom.ui.theme.PassRed
 import com.example.spectroom.ui.theme.TabSelected
 import java.text.DateFormat
 import java.util.Calendar
@@ -66,7 +68,7 @@ private val suggestedInterests = listOf(
     "Animals", "Science", "History", "Languages", "Volunteering",
 )
 
-private val genderOptions = listOf("Man", "Woman", "Non-binary")
+private val genderOptions = GenderPreferenceOption.all
 
 private fun genderLabelRes(value: String): Int = when (value) {
     "Man" -> R.string.profile_edit_gender_man
@@ -116,7 +118,7 @@ fun ProfileEditScreen(
         mutableStateOf(user?.interests.orEmpty())
     }
     var interestedIn by remember(user?.firebaseDocumentId, user?.interestedIn) {
-        mutableStateOf(user?.interestedIn.orEmpty())
+        mutableStateOf(GenderPreferenceOption.normalizeInterestedIn(user?.interestedIn.orEmpty()))
     }
     var lookingFor by remember(user?.firebaseDocumentId, user?.lookingFor) {
         mutableStateOf(user?.lookingFor.orEmpty())
@@ -127,11 +129,21 @@ fun ProfileEditScreen(
     var energyLevel by remember(user?.firebaseDocumentId, user?.energyLevel) {
         mutableIntStateOf(user?.energyLevel ?: EnergyLevel.FULLY_SOCIAL)
     }
-    var preferredAgeMin by remember(user?.firebaseDocumentId, user?.preferredAgeMin) {
-        mutableIntStateOf(user?.preferredAgeMin ?: 18)
+    var preferredAgeMin by remember(user?.firebaseDocumentId, user?.preferredAgeMin, user?.preferredAgeMax, user?.age) {
+        val (min, _) = PreferredAgeRangeLogic.initialRange(
+            userAge = user?.age?.takeIf { it >= 18 } ?: 18,
+            savedMin = user?.preferredAgeMin,
+            savedMax = user?.preferredAgeMax,
+        )
+        mutableIntStateOf(min)
     }
-    var preferredAgeMax by remember(user?.firebaseDocumentId, user?.preferredAgeMax) {
-        mutableIntStateOf(user?.preferredAgeMax ?: 35)
+    var preferredAgeMax by remember(user?.firebaseDocumentId, user?.preferredAgeMin, user?.preferredAgeMax, user?.age) {
+        val (_, max) = PreferredAgeRangeLogic.initialRange(
+            userAge = user?.age?.takeIf { it >= 18 } ?: 18,
+            savedMin = user?.preferredAgeMin,
+            savedMax = user?.preferredAgeMax,
+        )
+        mutableIntStateOf(max)
     }
     var lifestyle by remember(user?.firebaseDocumentId, user?.lifestyle) {
         mutableStateOf(user?.lifestyle.orEmpty())
@@ -270,6 +282,7 @@ fun ProfileEditScreen(
             scrollToValidationSection = validation.firstMissingSection()
         } else {
             val base = user ?: SpectRoomUser(email = "")
+            val (clampedMin, clampedMax) = PreferredAgeRangeLogic.clampRange(preferredAgeMin, preferredAgeMax)
             onSave(
                 base.copy(
                 name = name.trim(),
@@ -278,7 +291,7 @@ fun ProfileEditScreen(
                 bio = bio.trim(),
                 gender = gender,
                 interests = interests,
-                interestedIn = interestedIn,
+                interestedIn = GenderPreferenceOption.normalizeInterestedIn(interestedIn),
                 lookingFor = lookingFor,
                 idealFirstDate = idealFirstDate,
                 shareIdealFirstDate = shareIdealFirstDate,
@@ -289,8 +302,8 @@ fun ProfileEditScreen(
                 sensoryPreferences = sensoryPreferences,
                 shareSensoryPreferences = shareSensory,
                 energyLevel = energyLevel,
-                preferredAgeMin = preferredAgeMin,
-                preferredAgeMax = preferredAgeMax,
+                preferredAgeMin = clampedMin,
+                preferredAgeMax = clampedMax,
                 ),
             )
         }
@@ -320,17 +333,13 @@ fun ProfileEditScreen(
                 } else {
                     null
                 },
-                trailing = if (!mandatory) {
-                    {
-                        ProfilePillButton(
-                            text = stringResource(R.string.profile_edit_save),
-                            onClick = { performSave() },
-                            emphasized = true,
-                            enabled = !isSaving,
-                        )
-                    }
-                } else {
-                    null
+                trailing = {
+                    ProfilePillButton(
+                        text = stringResource(R.string.profile_edit_save),
+                        onClick = { performSave() },
+                        emphasized = true,
+                        enabled = !isSaving,
+                    )
                 },
             )
 
@@ -473,22 +482,6 @@ fun ProfileEditScreen(
         Spacer(modifier = Modifier.height(16.dp))
         ProfileEditSectionCard(
             modifier = sectionModifier(
-                section = ProfileValidationSection.ABOUT_ME,
-                isValid = validation.isBioValid,
-            ),
-        ) {
-            ProfileFieldHeading(stringResource(R.string.profile_edit_about_me))
-            Spacer(modifier = Modifier.height(12.dp))
-            ProfileBioField(
-                value = bio,
-                onValueChange = { bio = it },
-                characterCounter = bioCharacterCounter(bio),
-            )
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-        ProfileEditSectionCard(
-            modifier = sectionModifier(
                 section = ProfileValidationSection.GENDER_PREFERENCES,
                 isValid = validation.isGenderPreferencesValid,
             ),
@@ -513,6 +506,14 @@ fun ProfileEditScreen(
                 onToggle = { interestedIn = interestedIn.toggle(it) },
                 columns = 2,
             )
+            if (hasAttemptedSave && !validation.isInterestedInValid) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.profile_edit_validation_interested_in),
+                    color = PassRed,
+                    fontSize = 12.sp,
+                )
+            }
 
             ProfileSectionDivider()
             ProfileFieldSubheading(stringResource(R.string.profile_edit_looking_for))
@@ -531,11 +532,28 @@ fun ProfileEditScreen(
                     minAge = preferredAgeMin,
                     maxAge = preferredAgeMax,
                     onRangeChange = { min, max ->
-                        preferredAgeMin = min
-                        preferredAgeMax = max
+                        val (clampedMin, clampedMax) = PreferredAgeRangeLogic.clampRange(min, max)
+                        preferredAgeMin = clampedMin
+                        preferredAgeMax = clampedMax
                     },
                 )
             }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        ProfileEditSectionCard(
+            modifier = sectionModifier(
+                section = ProfileValidationSection.ABOUT_ME,
+                isValid = validation.isBioValid,
+            ),
+        ) {
+            ProfileFieldHeading(stringResource(R.string.profile_edit_about_me))
+            Spacer(modifier = Modifier.height(12.dp))
+            ProfileBioField(
+                value = bio,
+                onValueChange = { bio = it },
+                characterCounter = bioCharacterCounter(bio),
+            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -603,21 +621,6 @@ fun ProfileEditScreen(
                 columns = 2,
             )
         }
-
-        if (mandatory) {
-            Spacer(modifier = Modifier.height(24.dp))
-            Button(
-                onClick = performSave,
-                enabled = !isSaving,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = TabSelected),
-            ) {
-                Text(stringResource(R.string.profile_complete_welcome_continue), fontWeight = FontWeight.SemiBold)
-            }
-            }
         }
     }
 

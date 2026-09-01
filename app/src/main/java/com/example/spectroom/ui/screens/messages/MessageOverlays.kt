@@ -1,7 +1,10 @@
 package com.example.spectroom.ui.screens.messages
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -193,6 +196,98 @@ fun NewMessageNotificationModal(
                 }
             }
             Spacer(modifier = Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+fun VoiceLongPressTipOverlay(onDismiss: () -> Unit) {
+    val colors = LocalSpectRoomColors.current
+    val dismissInteraction = remember { MutableInteractionSource() }
+    val okInteraction = remember { MutableInteractionSource() }
+    val cardShape = RoundedCornerShape(28.dp)
+    val cardBackground = if (colors.isDark) {
+        Color(0xFF2C2C2E).copy(alpha = 0.88f)
+    } else {
+        Color.White.copy(alpha = 0.82f)
+    }
+    val buttonBackground = if (colors.isDark) {
+        Color.White.copy(alpha = 0.12f)
+    } else {
+        Color.Black.copy(alpha = 0.08f)
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.35f))
+                .clickable(
+                    interactionSource = dismissInteraction,
+                    indication = null,
+                    onClick = onDismiss,
+                )
+                .padding(horizontal = 28.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(cardShape)
+                    .background(cardBackground)
+                    .border(
+                        width = 0.5.dp,
+                        color = if (colors.isDark) {
+                            Color.White.copy(alpha = 0.14f)
+                        } else {
+                            Color.White.copy(alpha = 0.65f)
+                        },
+                        shape = cardShape,
+                    )
+                    .clickable(enabled = false) {}
+                    .padding(horizontal = 20.dp, vertical = 22.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = stringResource(R.string.messages_voice_long_press_tip_title),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp,
+                    color = colors.text,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = stringResource(R.string.messages_voice_long_press_tip_message),
+                    color = colors.secondaryText,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(modifier = Modifier.height(22.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(50))
+                        .background(buttonBackground)
+                        .clickable(
+                            interactionSource = okInteraction,
+                            indication = null,
+                            onClick = onDismiss,
+                        )
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(R.string.messages_voice_long_press_tip_got_it),
+                        color = colors.text,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 17.sp,
+                    )
+                }
+            }
         }
     }
 }

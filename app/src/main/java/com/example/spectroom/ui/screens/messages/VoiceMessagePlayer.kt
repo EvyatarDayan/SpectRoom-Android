@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import com.example.spectroom.ui.theme.AppSecondaryTextLight
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -223,12 +223,17 @@ fun VoiceMessagePlayer(
         formatVoiceTime(if (duration > 0f) duration else (displayDurationSeconds ?: 0.0).toFloat())
     }
 
+    val bubbleShape = remember(isOutgoing) { ChatBubbleShape(isOutgoing = isOutgoing) }
     Row(
         modifier = modifier
             .widthIn(min = 200.dp, max = 260.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(baseColor)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .clip(bubbleShape)
+            .background(baseColor, bubbleShape)
+            .padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 10.dp)
+            .padding(
+                start = if (isOutgoing) 0.dp else 7.dp,
+                end = if (isOutgoing) 7.dp else 0.dp,
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(
@@ -271,7 +276,7 @@ fun VoiceMessagePlayer(
                 if (!timestampText.isNullOrBlank()) {
                     Text(
                         text = timestampText,
-                        color = textColor.copy(alpha = 0.55f),
+                        color = AppSecondaryTextLight,
                         fontSize = 11.sp,
                     )
                 }
@@ -287,16 +292,32 @@ private fun VoiceMessageWaveform(
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
+    val barCount = 40
+    val scrubberPx = with(density) { 11.dp.toPx() }
+    val scrubberHitPx = with(density) { 32.dp.toPx() }
+    val barHeightsPx = remember(density) {
+        val pattern = floatArrayOf(
+            6f, 10f, 14f, 8f, 16f, 9f, 12f, 7f, 15f, 10f,
+            11f, 8f, 17f, 10f, 13f, 7f, 15f, 9f, 12f, 7f,
+            14f, 10f, 11f, 8f, 16f, 9f, 12f, 7f, 15f, 10f,
+            11f, 7f, 14f, 9f, 16f, 8f, 12f, 7f, 13f, 9f,
+        )
+        pattern.map { with(density) { it.dp.toPx() } }.toFloatArray()
+    }
+    val thinBarPx = with(density) { 2.dp.toPx() }
+    val thickBarPx = with(density) { 2.5.dp.toPx() }
     var dragStart by remember { mutableStateOf<Float?>(null) }
+
     Box(modifier = modifier) {
         Canvas(modifier = Modifier.matchParentSize()) {
-            val barCount = 40
             val step = size.width / (barCount - 1).coerceAtLeast(1)
+            val verticalInset = with(density) { 2.dp.toPx() }
+            val maxBarHeight = (size.height - verticalInset * 2f).coerceAtLeast(1f)
             for (index in 0 until barCount) {
                 val normalized = index.toFloat() / (barCount - 1).coerceAtLeast(1)
                 val played = normalized <= progress
-                val barW = if (index % 4 == 0) 2.5f else 2f
-                val barH = barHeight(index).coerceAtMost(size.height - 4f)
+                val barW = if (index % 4 == 0) thickBarPx else thinBarPx
+                val barH = barHeightsPx[index % barHeightsPx.size].coerceAtMost(maxBarHeight)
                 val x = step * index
                 drawRoundRect(
                     color = if (played) PlayedWave else UnplayedWave,
@@ -306,14 +327,23 @@ private fun VoiceMessageWaveform(
                 )
             }
         }
-        val scrubberPx = with(density) { 11.dp.toPx() }
-        val hitPx = with(density) { 32.dp.toPx() }
         Canvas(
             modifier = Modifier
                 .matchParentSize()
                 .pointerInput(Unit) {
                     detectDragGestures(
-                        onDragStart = { dragStart = progress },
+                        onDragStart = { offset ->
+                            val width = size.width.toFloat().coerceAtLeast(1f)
+                            val touchX = offset.x.coerceIn(0f, width)
+                            val touchProgress = (touchX / width).coerceIn(0f, 1f)
+                            val scrubberX = width * progress.coerceIn(0f, 1f)
+                            if (kotlin.math.abs(touchX - scrubberX) <= scrubberHitPx / 2f) {
+                                dragStart = progress
+                            } else {
+                                dragStart = touchProgress
+                                onSeek(touchProgress)
+                            }
+                        },
                         onDragEnd = { dragStart = null },
                         onDragCancel = { dragStart = null },
                         onDrag = { change, dragAmount ->
@@ -330,28 +360,17 @@ private fun VoiceMessageWaveform(
             val x = (size.width * progress.coerceIn(0f, 1f))
                 .coerceIn(scrubberPx / 2f, size.width - scrubberPx / 2f)
             drawCircle(
+                color = Color.Black.copy(alpha = 0.15f),
+                radius = scrubberPx / 2f,
+                center = Offset(x, size.height / 2f + 0.5f),
+            )
+            drawCircle(
                 color = ScrubberColor,
                 radius = scrubberPx / 2f,
                 center = Offset(x, size.height / 2f),
             )
-            // Expand hit area visually transparent — drag uses full canvas.
-            drawCircle(
-                color = Color.Transparent,
-                radius = hitPx / 2f,
-                center = Offset(x, size.height / 2f),
-            )
         }
     }
-}
-
-private fun barHeight(index: Int): Float {
-    val pattern = floatArrayOf(
-        6f, 10f, 14f, 8f, 16f, 9f, 12f, 7f, 15f, 10f,
-        11f, 8f, 17f, 10f, 13f, 7f, 15f, 9f, 12f, 7f,
-        14f, 10f, 11f, 8f, 16f, 9f, 12f, 7f, 15f, 10f,
-        11f, 7f, 14f, 9f, 16f, 8f, 12f, 7f, 13f, 9f,
-    )
-    return pattern[index % pattern.size]
 }
 
 private fun formatVoiceTime(seconds: Float): String {

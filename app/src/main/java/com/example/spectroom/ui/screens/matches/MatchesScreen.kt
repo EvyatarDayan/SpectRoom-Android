@@ -556,7 +556,7 @@ private fun MatchGridCard(
                 Text(
                     text = stringResource(
                         R.string.matches_energy_today,
-                        EnergyLevel.label(profile.energyLevel),
+                        stringResource(EnergyLevel.titleRes(profile.energyLevel)),
                     ),
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 16.sp,

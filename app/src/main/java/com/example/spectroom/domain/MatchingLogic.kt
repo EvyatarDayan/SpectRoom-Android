@@ -1,5 +1,6 @@
 package com.example.spectroom.domain
 
+import com.example.spectroom.data.model.GenderPreferenceOption
 import com.example.spectroom.data.model.MatchBreakdown
 import com.example.spectroom.data.model.SpectRoomUser
 import com.example.spectroom.data.model.UserProfileStatus
@@ -53,7 +54,7 @@ object ProfileCompletion {
             hasValidGallery(photos),
             interests.size >= 3,
             gender.trim().isNotEmpty(),
-            interestedIn.isNotEmpty(),
+            GenderPreferenceOption.hasValidInterestedIn(interestedIn),
             lookingFor.isNotEmpty(),
             idealFirstDate.isNotEmpty(),
         )
@@ -69,7 +70,7 @@ object ProfileCompletion {
         hasValidGallery(user.photos),
         user.interests.size >= 3,
         user.gender.trim().isNotEmpty(),
-        user.interestedIn.isNotEmpty(),
+        GenderPreferenceOption.hasValidInterestedIn(user.interestedIn),
         user.lookingFor.isNotEmpty(),
         user.idealFirstDate.isNotEmpty(),
     )

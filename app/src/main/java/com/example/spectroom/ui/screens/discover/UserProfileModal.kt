@@ -6,8 +6,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,23 +13,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Report
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,29 +32,44 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
 import com.example.spectroom.R
+import com.example.spectroom.data.model.BodyTypeOption
 import com.example.spectroom.data.model.EnergyLevel
 import com.example.spectroom.data.model.IdealFirstDateOption
+import com.example.spectroom.data.model.LifestyleOption
+import com.example.spectroom.data.model.LookingForOption
 import com.example.spectroom.data.model.MatchBreakdown
 import com.example.spectroom.data.model.ProfileCard
+import com.example.spectroom.data.model.ProfileReportReason
 import com.example.spectroom.data.model.SensoryPreferenceOption
-import com.example.spectroom.ui.theme.DistanceAccent
+import com.example.spectroom.ui.screens.profile.ProfileBlueField
+import com.example.spectroom.ui.screens.profile.ProfileBlueFieldText
+import com.example.spectroom.ui.screens.profile.ProfileEditSectionCard
+import com.example.spectroom.ui.screens.profile.ProfileFieldHeading
+import com.example.spectroom.ui.screens.profile.ProfileGalleryPhotosCard
+import com.example.spectroom.ui.screens.profile.ProfilePhotoStyle
+import com.example.spectroom.ui.screens.profile.ProfileCircleIconButton
+import com.example.spectroom.ui.screens.profile.ProfilePillButton
 import com.example.spectroom.ui.theme.EnergyFullySocial
 import com.example.spectroom.ui.theme.EnergyLow
 import com.example.spectroom.ui.theme.EnergyModerate
-import com.example.spectroom.ui.theme.LikeRed
+import com.example.spectroom.ui.theme.LikeGreen
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
+import com.example.spectroom.ui.theme.PassRed
 import com.example.spectroom.ui.theme.TabSelected
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun UserProfileModal(
     profile: ProfileCard,
@@ -74,329 +80,465 @@ fun UserProfileModal(
     onReport: () -> Unit,
     onOpenPhotos: (List<String>, Int) -> Unit = { _, _ -> },
     onRefresh: () -> Unit = {},
+    blockConfirmationFirstName: String? = null,
+    onDismissBlockConfirmation: () -> Unit = {},
+    onConfirmBlockOnly: () -> Unit = {},
+    onConfirmBlockAndReport: () -> Unit = {},
+    onCompleteBlockConfirmation: () -> Unit = {},
+    showBlockReport: Boolean = false,
+    showReportThankYou: Boolean = false,
+    onSubmitBlockReport: (ProfileReportReason, String?) -> Unit = { _, _ -> },
+    onCancelBlockReport: () -> Unit = {},
+    onDismissReportThankYou: () -> Unit = {},
 ) {
     val colors = LocalSpectRoomColors.current
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val photos = buildList {
+    val galleryPhotos = profile.photos.filter { it.isNotBlank() && it != profile.imageURL }
+    val allPhotos = buildList {
         profile.imageURL?.takeIf { it.isNotBlank() }?.let(::add)
-        addAll(profile.photos.filter { it.isNotBlank() && it != profile.imageURL })
-    }
-    val energyColor = when (profile.energyLevel) {
-        EnergyLevel.LOW -> EnergyLow
-        EnergyLevel.MODERATE -> EnergyModerate
-        else -> EnergyFullySocial
+        addAll(galleryPhotos)
     }
     val percentage = matchBreakdown?.percentage ?: profile.matchPercentage
+    val matchColor = if (percentage > 49) LikeGreen else colors.secondaryText
     val firstName = profile.name.substringBefore(' ').ifBlank { profile.name }
-    val lookingForItems = profile.lookingFor.filterNot {
-        it.equals("Not Sure Yet", ignoreCase = true) || it.equals("Not sure yet", ignoreCase = true)
-    }
     var showingMatchDetails by remember { mutableStateOf(false) }
-    var showingLookingForDetails by remember { mutableStateOf(false) }
 
     LaunchedEffect(profile.userId) {
         onRefresh()
     }
 
-    ModalBottomSheet(
+    Dialog(
         onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = colors.background,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        Column(
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(640.dp),
+                .fillMaxSize()
+                .background(colors.background)
+                .statusBarsPadding(),
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = onBlock) {
-                    Icon(Icons.Filled.Close, contentDescription = "Block", tint = colors.secondaryText)
-                }
-                Text(
-                    text = profile.name,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.text,
-                    modifier = Modifier.weight(1f),
-                    fontSize = 18.sp,
-                )
-                IconButton(onClick = onReport) {
-                    Icon(Icons.Filled.Report, contentDescription = "Report", tint = colors.secondaryText)
-                }
-                TextButton(onClick = onDismiss) {
-                    Text("Done", color = TabSelected)
-                }
-            }
-
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp)
-                    .padding(bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                Box {
-                    AsyncImage(
-                        model = profile.imageURL ?: photos.firstOrNull(),
-                        contentDescription = profile.name,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(280.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .clickable {
-                                if (photos.isNotEmpty()) onOpenPhotos(photos, 0)
-                            },
-                    )
-                    Row(
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(12.dp)
-                            .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (profile.isOnline) EnergyFullySocial
-                                    else Color.White.copy(alpha = 0.55f),
-                                ),
-                        )
-                        Spacer(modifier = Modifier.size(6.dp))
-                        Text(
-                            stringResource(
-                                if (profile.isOnline) {
-                                    R.string.discover_online_now
-                                } else {
-                                    R.string.discover_offline
-                                },
-                            ),
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
-                }
-
-                if (photos.size > 1) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        photos.drop(1).take(4).forEachIndexed { index, url ->
-                            AsyncImage(
-                                model = url,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(72.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .clickable { onOpenPhotos(photos, index + 1) },
-                            )
-                        }
-                    }
-                }
-
-                Text(
-                    "${profile.name}, ${profile.age}",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 24.sp,
-                    color = colors.text,
-                )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
+            Column(modifier = Modifier.fillMaxSize()) {
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { showingMatchDetails = true },
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        LinearProgressIndicator(
-                            progress = { (percentage / 100f).coerceIn(0f, 1f) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(8.dp)
-                                .clip(RoundedCornerShape(8.dp)),
-                            color = if (percentage > 49) Color(0xFF4CAF50) else DistanceAccent,
-                            trackColor = colors.secondaryText.copy(alpha = 0.2f),
-                            strokeCap = StrokeCap.Round,
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = buildMatchSentence(
-                                percentage = percentage,
-                                firstName = firstName,
-                                percentColor = if (percentage > 49) Color(0xFF4CAF50) else DistanceAccent,
-                            ),
-                            color = colors.text,
-                            fontSize = 14.sp,
-                        )
-                    }
-                    IconButton(onClick = { showingMatchDetails = true }) {
-                        Icon(Icons.Filled.Info, contentDescription = null, tint = TabSelected)
-                    }
-                }
-                Text(profile.distance, color = colors.secondaryText)
-                Text(
-                    "${EnergyLevel.emoji(profile.energyLevel)} ${EnergyLevel.label(profile.energyLevel)}",
-                    color = energyColor,
-                    fontWeight = FontWeight.Medium,
-                )
-
-                SectionCard(title = "About") {
-                    Text(profile.bio.ifBlank { "No bio yet" }, color = colors.text, fontSize = 14.sp)
-                }
-
-                if (lookingForItems.isNotEmpty()) {
-                    SectionCard(title = "Looking for") {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = lookingForItems.first(),
-                                color = colors.text,
-                                modifier = Modifier.weight(1f),
-                                maxLines = 1,
-                            )
-                            if (lookingForItems.size > 1) {
-                                IconButton(onClick = { showingLookingForDetails = true }) {
-                                    Icon(Icons.Filled.Info, contentDescription = null, tint = TabSelected)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (profile.interests.isNotEmpty()) {
-                    SectionCard(title = "Interests") {
-                        ChipFlow(profile.interests)
-                    }
-                }
-
-                if (profile.shareLifestyle && profile.lifestyle.isNotBlank() && profile.lifestyle != "preferNot") {
-                    SectionCard(title = "Lifestyle") {
-                        Text(profile.lifestyle, color = colors.text)
-                    }
-                }
-
-                if (profile.shareIdealFirstDate && profile.idealFirstDate.isNotEmpty()) {
-                    SectionCard(title = "Ideal first date") {
-                        ChipFlow(
-                            profile.idealFirstDate.map { raw ->
-                                IdealFirstDateOption.entries.firstOrNull { it.rawValue == raw }?.displayName
-                                    ?: raw
-                            },
-                        )
-                    }
-                }
-
-                if (profile.shareSensoryPreferences && profile.sensoryPreferences.isNotEmpty()) {
-                    SectionCard(title = "Sensory preferences") {
-                        ChipFlow(
-                            profile.sensoryPreferences.map {
-                                SensoryPreferenceOption.fromRaw(it)?.title ?: it
-                            },
-                        )
-                    }
-                }
-
-                matchBreakdown?.let { breakdown ->
-                    if (breakdown.commonInterests.isNotEmpty() ||
-                        breakdown.commonLookingFor.isNotEmpty() ||
-                        breakdown.sharedLifestyle != null
-                    ) {
-                        SectionCard(title = "Why you match") {
-                            if (breakdown.commonInterests.isNotEmpty()) {
-                                Text(
-                                    "Shared interests: ${breakdown.commonInterests.joinToString()}",
-                                    color = colors.text,
-                                    fontSize = 13.sp,
-                                )
-                            }
-                            if (breakdown.commonLookingFor.isNotEmpty()) {
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    "Shared goals: ${breakdown.commonLookingFor.joinToString()}",
-                                    color = colors.text,
-                                    fontSize = 13.sp,
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    TextButton(
-                        onClick = onMessage,
+                    ProfileCircleIconButton(
+                        onClick = onBlock,
+                        icon = Icons.Filled.Block,
+                        contentDescription = stringResource(R.string.profile_block),
+                        iconTint = PassRed,
+                        modifier = Modifier.align(Alignment.CenterStart),
+                    )
+                    Text(
+                        text = profile.name.ifBlank { stringResource(R.string.profile_my_title) },
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp,
+                        color = colors.text,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier
-                            .weight(1f)
-                            .background(TabSelected, RoundedCornerShape(14.dp)),
-                    ) {
-                        Icon(Icons.Filled.Favorite, contentDescription = null, tint = androidx.compose.ui.graphics.Color.White)
-                        Spacer(modifier = Modifier.size(8.dp))
-                        Text("Message", color = androidx.compose.ui.graphics.Color.White)
+                            .fillMaxWidth()
+                            .padding(horizontal = 72.dp)
+                            .align(Alignment.Center),
+                    )
+                    Box(modifier = Modifier.align(Alignment.CenterEnd)) {
+                        ProfilePillButton(
+                            text = stringResource(R.string.settings_done),
+                            onClick = onDismiss,
+                        )
+                    }
+                }
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp)
+                        .padding(top = 16.dp, bottom = 100.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    ProfilePhotoSection(
+                        imageUrl = profile.imageURL,
+                        onClick = {
+                            if (allPhotos.isNotEmpty()) onOpenPhotos(allPhotos, 0)
+                        },
+                    )
+
+                    ProfileGalleryPhotosCard(
+                        photoUrls = galleryPhotos,
+                        title = stringResource(R.string.profile_photos),
+                        emptyMessage = stringResource(R.string.profile_no_photos),
+                        onSelectPhoto = { index ->
+                            val start = if (profile.imageURL.isNullOrBlank()) index else index + 1
+                            onOpenPhotos(
+                                allPhotos,
+                                start.coerceAtMost(allPhotos.lastIndex.coerceAtLeast(0)),
+                            )
+                        },
+                    )
+
+                    MatchSectionCard(
+                        percentage = percentage,
+                        matchColor = matchColor,
+                        firstName = firstName,
+                        onOpenDetails = { showingMatchDetails = true },
+                    )
+
+                    ProfileEditSectionCard {
+                        ProfileFieldHeading(stringResource(R.string.profile_age))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        ProfileBlueFieldText(
+                            text = "${profile.age} ${stringResource(R.string.profile_years_old)}",
+                        )
+                    }
+
+                    ProfileEditSectionCard {
+                        ProfileFieldHeading(stringResource(R.string.profile_location))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        ProfileBlueFieldText(
+                            text = profile.distance.ifBlank {
+                                stringResource(R.string.profile_location_not_specified)
+                            },
+                            secondary = profile.distance.isBlank(),
+                        )
+                    }
+
+                    EnergySectionCard(energyLevel = profile.energyLevel)
+
+                    PreferencesSectionCard(profile = profile)
+
+                    AboutSectionCard(profile = profile)
+
+                    ProfileEditSectionCard {
+                        ProfileFieldHeading(stringResource(R.string.profile_interests))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        if (profile.interests.isEmpty()) {
+                            ProfileBlueFieldText(
+                                text = stringResource(R.string.profile_no_interests),
+                                secondary = true,
+                            )
+                        } else {
+                            ProfileBlueFieldText(text = profile.interests.joinToString(", "))
+                        }
                     }
                 }
             }
-        }
-    }
 
-    if (showingMatchDetails) {
-        MatchDetailsOverlay(
-            firstName = firstName,
-            breakdown = matchBreakdown,
-            onDismiss = { showingMatchDetails = false },
-        )
-    }
-    if (showingLookingForDetails) {
-        LookingForDetailsOverlay(
-            items = lookingForItems,
-            onDismiss = { showingLookingForDetails = false },
-        )
+            if (showingMatchDetails) {
+                MatchDetailsOverlay(
+                    firstName = firstName,
+                    breakdown = matchBreakdown,
+                    onDismiss = { showingMatchDetails = false },
+                )
+            }
+            if (blockConfirmationFirstName != null) {
+                BlockConfirmationOverlay(
+                    firstName = blockConfirmationFirstName,
+                    onDismiss = onDismissBlockConfirmation,
+                    onBlock = onConfirmBlockOnly,
+                    onBlockAndReport = onConfirmBlockAndReport,
+                    onBlockComplete = onCompleteBlockConfirmation,
+                )
+            }
+            if (showBlockReport) {
+                ReportReasonOverlay(
+                    firstName = firstName,
+                    onCancel = onCancelBlockReport,
+                    onSubmit = onSubmitBlockReport,
+                )
+            }
+            if (showReportThankYou) {
+                ReportThankYouOverlay(onDismiss = onDismissReportThankYou)
+            }
+        }
     }
 }
 
 @Composable
-private fun SectionCard(title: String, content: @Composable () -> Unit) {
+private fun ProfilePhotoSection(
+    imageUrl: String?,
+    onClick: () -> Unit,
+) {
     val colors = LocalSpectRoomColors.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .shadow(8.dp, RoundedCornerShape(ProfilePhotoStyle.cardCorner), clip = false)
+            .clip(RoundedCornerShape(ProfilePhotoStyle.cardCorner))
             .background(colors.card)
-            .border(1.dp, colors.border, RoundedCornerShape(16.dp))
-            .padding(14.dp),
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(title, fontWeight = FontWeight.SemiBold, color = colors.text)
-        Spacer(modifier = Modifier.height(8.dp))
-        content()
+        ProfileFieldHeading(stringResource(R.string.profile_photo))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(ProfilePhotoStyle.mainPhotoHeight)
+                .clip(RoundedCornerShape(ProfilePhotoStyle.photoCorner))
+                .background(Color.Gray.copy(alpha = 0.18f))
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!imageUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = imageUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Filled.Person,
+                    contentDescription = null,
+                    tint = colors.secondaryText,
+                    modifier = Modifier.size(56.dp),
+                )
+            }
+        }
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ChipFlow(items: List<String>) {
+private fun MatchSectionCard(
+    percentage: Int,
+    matchColor: Color,
+    firstName: String,
+    onOpenDetails: () -> Unit,
+) {
     val colors = LocalSpectRoomColors.current
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        items.forEach { item ->
-            Text(
-                text = item,
-                color = colors.text,
-                fontSize = 13.sp,
-                modifier = Modifier
-                    .background(colors.background, RoundedCornerShape(16.dp))
-                    .border(1.dp, colors.border, RoundedCornerShape(16.dp))
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
+    ProfileEditSectionCard {
+        ProfileBlueField(
+            modifier = Modifier.clickable(onClick = onOpenDetails),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color.Black.copy(alpha = 0.08f)),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth((percentage / 100f).coerceIn(0f, 1f))
+                            .height(6.dp)
+                            .background(matchColor, RoundedCornerShape(6.dp)),
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = buildMatchSentence(
+                            percentage = percentage,
+                            firstName = firstName,
+                            percentColor = matchColor,
+                        ),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.text,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Icon(
+                        imageVector = Icons.Filled.Info,
+                        contentDescription = null,
+                        tint = TabSelected,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EnergySectionCard(energyLevel: Int) {
+    val colors = LocalSpectRoomColors.current
+    val energyColor = when (EnergyLevel.resolve(energyLevel)) {
+        EnergyLevel.LOW -> EnergyLow
+        EnergyLevel.MODERATE -> EnergyModerate
+        else -> EnergyFullySocial
+    }
+    ProfileEditSectionCard {
+        ProfileFieldHeading(stringResource(R.string.profile_energy_level))
+        Spacer(modifier = Modifier.height(14.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(energyColor.copy(alpha = 0.12f))
+                .border(1.5.dp, energyColor.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+                .padding(14.dp),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(EnergyLevel.emoji(energyLevel), fontSize = 28.sp)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(EnergyLevel.titleRes(energyLevel)),
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 17.sp,
+                    color = energyColor,
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = stringResource(EnergyLevel.detailRes(energyLevel)),
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 15.sp,
+                    color = colors.text,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PreferencesSectionCard(
+    profile: ProfileCard,
+) {
+    val hasGenderOrInterested = profile.gender.isNotBlank() || profile.interestedIn.isNotEmpty()
+    val hasLookingFor = profile.lookingFor.isNotEmpty()
+    val defaultMin = profile.age
+    val defaultMax = minOf(profile.age + 5, 70)
+    val hasCustomPreferredAge =
+        profile.preferredAgeMin != defaultMin || profile.preferredAgeMax != defaultMax
+
+    ProfileEditSectionCard {
+        ProfileFieldHeading(stringResource(R.string.profile_preferences))
+        Spacer(modifier = Modifier.height(12.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            when {
+                profile.gender.isNotBlank() && profile.interestedIn.isNotEmpty() -> {
+                    ProfileBlueFieldText(
+                        text = "${stringResource(R.string.profile_im_a)} ${profile.gender.lowercase()}, " +
+                            "${stringResource(R.string.profile_interested_in_label)} ${formatInterestedIn(profile.interestedIn)}",
+                        italic = true,
+                    )
+                }
+                profile.gender.isNotBlank() -> {
+                    ProfileBlueFieldText(
+                        text = "${stringResource(R.string.profile_im_a)} ${profile.gender.lowercase()}",
+                        italic = true,
+                    )
+                }
+                profile.interestedIn.isNotEmpty() -> {
+                    ProfileBlueFieldText(
+                        text = "${stringResource(R.string.profile_interested_in_label).replaceFirstChar { it.uppercase() }} " +
+                            formatInterestedIn(profile.interestedIn),
+                        italic = true,
+                    )
+                }
+            }
+
+            if (hasLookingFor) {
+                ProfileBlueFieldText(
+                    text = stringResource(
+                        R.string.profile_looking_for_prefix,
+                        formatLookingForList(profile.lookingFor),
+                    ),
+                    italic = true,
+                )
+            }
+
+            if (hasCustomPreferredAge) {
+                ProfileBlueFieldText(
+                    text = stringResource(
+                        R.string.profile_my_preferred_age,
+                        profile.preferredAgeMin.toString(),
+                        profile.preferredAgeMax.toString(),
+                    ),
+                    italic = true,
+                )
+            }
+
+            if (!hasGenderOrInterested && !hasLookingFor && !hasCustomPreferredAge) {
+                ProfileBlueFieldText(
+                    text = stringResource(R.string.profile_no_preferences),
+                    secondary = true,
+                    italic = true,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AboutSectionCard(profile: ProfileCard) {
+    ProfileEditSectionCard {
+        ProfileFieldHeading(stringResource(R.string.profile_about_me))
+        Spacer(modifier = Modifier.height(12.dp))
+        val bio = profile.bio.trim()
+        ProfileBlueFieldText(
+            text = bio.ifBlank { stringResource(R.string.profile_no_bio) },
+            secondary = bio.isBlank(),
+        )
+
+        if (profile.shareLifestyle && profile.lifestyle.isNotBlank() && profile.lifestyle != "preferNot") {
+            Spacer(modifier = Modifier.height(16.dp))
+            ProfileFieldHeading(stringResource(R.string.profile_lifestyle_title))
+            Spacer(modifier = Modifier.height(12.dp))
+            ProfileBlueFieldText(text = formatLifestyle(profile.lifestyle))
+        }
+
+        if (profile.shareBodyType && profile.bodyType.isNotBlank() && profile.bodyType != "preferNot") {
+            Spacer(modifier = Modifier.height(16.dp))
+            ProfileFieldHeading(stringResource(R.string.profile_body_type))
+            Spacer(modifier = Modifier.height(12.dp))
+            ProfileBlueFieldText(text = formatBodyType(profile.bodyType))
+        }
+
+        if (profile.idealFirstDate.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(16.dp))
+            ProfileFieldHeading(stringResource(R.string.profile_ideal_first_date))
+            Spacer(modifier = Modifier.height(12.dp))
+            ProfileBlueFieldText(text = formatIdealFirstDate(profile.idealFirstDate))
+        }
+
+        if (profile.sensoryPreferences.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(16.dp))
+            ProfileFieldHeading(stringResource(R.string.profile_sensory_preferences))
+            Spacer(modifier = Modifier.height(12.dp))
+            ProfileBlueFieldText(
+                text = SensoryPreferenceOption.formattedTitles(profile.sensoryPreferences),
             )
         }
     }
 }
+
+@Composable
+private fun formatInterestedIn(preferences: List<String>): String {
+    if (preferences.any { it.equals("Anyone", ignoreCase = true) }) {
+        return stringResource(R.string.profile_interested_anyone)
+    }
+    if (preferences.isEmpty()) {
+        return stringResource(R.string.profile_no_one)
+    }
+    return preferences.joinToString(" / ") { it.lowercase() }
+}
+
+@Composable
+private fun formatLookingForList(lookingFor: List<String>): String {
+    if (lookingFor.isEmpty()) {
+        return stringResource(R.string.profile_nothing_specific)
+    }
+    return lookingFor.joinToString(" / ") { formatLookingForItem(it) }
+}
+
+private fun formatLookingForItem(raw: String): String =
+    LookingForOption.entries.firstOrNull { it.rawValue.equals(raw, ignoreCase = true) }?.displayName
+        ?: raw
+
+private fun formatLifestyle(lifestyle: String): String =
+    LifestyleOption.entries.firstOrNull { it.rawValue == lifestyle }?.displayName ?: lifestyle
+
+private fun formatBodyType(bodyType: String): String =
+    BodyTypeOption.entries.firstOrNull { it.rawValue == bodyType }?.displayName ?: bodyType
+
+private fun formatIdealFirstDate(values: List<String>): String =
+    values.joinToString(", ") { raw ->
+        IdealFirstDateOption.entries.firstOrNull { it.rawValue == raw }?.displayName ?: raw
+    }

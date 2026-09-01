@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -30,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -123,6 +125,45 @@ fun ProfileSectionDivider() {
             .background(Color.Gray.copy(alpha = 0.3f)),
     )
     Spacer(modifier = Modifier.height(8.dp))
+}
+
+@Composable
+fun ProfileBlueField(
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(ProfileFieldStyle.fieldCorner))
+            .background(profileFieldBackground())
+            .border(
+                ProfileFieldStyle.fieldBorderWidth,
+                profileFieldBorder(),
+                RoundedCornerShape(ProfileFieldStyle.fieldCorner),
+            )
+            .padding(horizontal = 14.dp, vertical = 14.dp),
+        content = content,
+    )
+}
+
+@Composable
+fun ProfileBlueFieldText(
+    text: String,
+    italic: Boolean = false,
+    secondary: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalSpectRoomColors.current
+    ProfileBlueField(modifier = modifier) {
+        Text(
+            text = text,
+            fontSize = 16.sp,
+            lineHeight = 22.sp,
+            color = if (secondary) colors.secondaryText else colors.text,
+            fontStyle = if (italic) FontStyle.Italic else FontStyle.Normal,
+        )
+    }
 }
 
 @Composable

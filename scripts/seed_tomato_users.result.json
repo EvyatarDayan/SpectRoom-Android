@@ -1,0 +1,112 @@
+[
+  {
+    "index": 1,
+    "email": "tomato1@yopmail.com",
+    "password": "Password1",
+    "uid": "6SgeaxNIbwWXhTQKeuv9U5Z4hJj1",
+    "name": "Ella Lindberg",
+    "age": 22,
+    "city": "Stockholm",
+    "created": false,
+    "emailVerifiedInAuth": false
+  },
+  {
+    "index": 2,
+    "email": "tomato2@yopmail.com",
+    "password": "Password1",
+    "uid": "C92ZndUA8qfMfRS2Iw3EPnnQ82z2",
+    "name": "Maja Bergström",
+    "age": 23,
+    "city": "Linköping",
+    "created": false,
+    "emailVerifiedInAuth": false
+  },
+  {
+    "index": 3,
+    "email": "tomato3@yopmail.com",
+    "password": "Password1",
+    "uid": "bRcyzl4jqFhZrh6YpO3oFyTJIWq1",
+    "name": "Saga Karlsson",
+    "age": 20,
+    "city": "Umeå",
+    "created": false,
+    "emailVerifiedInAuth": false
+  },
+  {
+    "index": 4,
+    "email": "tomato4@yopmail.com",
+    "password": "Password1",
+    "uid": "pmSw6BXaMRhDqXdufpqbvNMGTeo2",
+    "name": "Viktor Eriksson",
+    "age": 29,
+    "city": "Örebro",
+    "created": false,
+    "emailVerifiedInAuth": false
+  },
+  {
+    "index": 5,
+    "email": "tomato5@yopmail.com",
+    "password": "Password1",
+    "uid": "9yeu3RWPpBUQrPlN3BbE3IwWTTl1",
+    "name": "Noah Johansson",
+    "age": 21,
+    "city": "Lund",
+    "created": false,
+    "emailVerifiedInAuth": false
+  },
+  {
+    "index": 6,
+    "email": "tomato6@yopmail.com",
+    "password": "Password1",
+    "uid": "mAtq8nAgeZdUJxqqkRngohOgCbe2",
+    "name": "Alma Nilsson",
+    "age": 21,
+    "city": "Malmö",
+    "created": false,
+    "emailVerifiedInAuth": false
+  },
+  {
+    "index": 7,
+    "email": "tomato7@yopmail.com",
+    "password": "Password1",
+    "uid": "fHzj52EybdVEUBzQih783RkTJs92",
+    "name": "Leo Holm",
+    "age": 20,
+    "city": "Lund",
+    "created": false,
+    "emailVerifiedInAuth": false
+  },
+  {
+    "index": 8,
+    "email": "tomato8@yopmail.com",
+    "password": "Password1",
+    "uid": "E9lR8tZ2HDXYHxfCmA3W7Pc1Q8Z2",
+    "name": "Freja Lundgren",
+    "age": 20,
+    "city": "Linköping",
+    "created": false,
+    "emailVerifiedInAuth": false
+  },
+  {
+    "index": 9,
+    "email": "tomato9@yopmail.com",
+    "password": "Password1",
+    "uid": "KQFZRaTU6LWKtSKxacVLWRtv1BD2",
+    "name": "Oscar Sandberg",
+    "age": 21,
+    "city": "Linköping",
+    "created": false,
+    "emailVerifiedInAuth": false
+  },
+  {
+    "index": 10,
+    "email": "tomato10@yopmail.com",
+    "password": "Password1",
+    "uid": "McVuHanqzGhvLjgG8ygFvmqQOAk2",
+    "name": "Nora Forsberg",
+    "age": 26,
+    "city": "Stockholm",
+    "created": false,
+    "emailVerifiedInAuth": false
+  }
+]

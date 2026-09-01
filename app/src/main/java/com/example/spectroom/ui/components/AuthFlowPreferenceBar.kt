@@ -37,7 +37,7 @@ fun AuthFlowPreferenceBar(
         modifier = Modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 20.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -46,12 +46,12 @@ fun AuthFlowPreferenceBar(
                 .clip(RoundedCornerShape(20.dp))
                 .background(colors.card.copy(alpha = 0.92f))
                 .clickable(onClick = onToggleDarkMode)
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Icon(
-                imageVector = if (isDarkMode) Icons.Filled.LightMode else Icons.Filled.DarkMode,
+                imageVector = if (isDarkMode) Icons.Filled.DarkMode else Icons.Filled.LightMode,
                 contentDescription = null,
                 tint = if (isDarkMode) androidx.compose.ui.graphics.Color(0xFFFFC107) else androidx.compose.ui.graphics.Color(0xFFFF9800),
             )
@@ -60,7 +60,7 @@ fun AuthFlowPreferenceBar(
                     if (isDarkMode) R.string.settings_light_mode else R.string.settings_dark_mode,
                 ),
                 color = colors.text,
-                fontSize = 13.sp,
+                fontSize = 14.sp,
             )
         }
         Row(
@@ -68,12 +68,12 @@ fun AuthFlowPreferenceBar(
                 .clip(RoundedCornerShape(20.dp))
                 .background(colors.card.copy(alpha = 0.92f))
                 .clickable(onClick = onLanguageClick)
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(language.flag, fontSize = 16.sp)
-            Text(language.name, color = colors.text, fontSize = 13.sp)
+            Text(language.name, color = colors.text, fontSize = 14.sp)
         }
     }
 }

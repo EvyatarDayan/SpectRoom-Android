@@ -1,5 +1,6 @@
 package com.example.spectroom.domain
 
+import com.example.spectroom.data.model.GenderPreferenceOption
 import com.example.spectroom.data.model.SpectRoomUser
 import java.net.URI
 
@@ -21,6 +22,9 @@ data class ProfileValidationResult(
     val isNameValid: Boolean,
     val isAgeValid: Boolean,
     val isLocationValid: Boolean,
+    val isGenderValid: Boolean,
+    val isInterestedInValid: Boolean,
+    val isLookingForValid: Boolean,
     val isGenderPreferencesValid: Boolean,
     val isBioValid: Boolean,
     val isIdealFirstDateValid: Boolean,
@@ -72,8 +76,11 @@ object ProfileValidation {
         isNameValid = hasFullName(name),
         isAgeValid = age >= 18,
         isLocationValid = hasLocation(locationDisplay, locationLat, locationLon),
+        isGenderValid = gender.trim().isNotEmpty(),
+        isInterestedInValid = GenderPreferenceOption.hasValidInterestedIn(interestedIn),
+        isLookingForValid = lookingFor.isNotEmpty(),
         isGenderPreferencesValid = gender.trim().isNotEmpty() &&
-            interestedIn.isNotEmpty() &&
+            GenderPreferenceOption.hasValidInterestedIn(interestedIn) &&
             lookingFor.isNotEmpty(),
         isBioValid = bio.trim().length >= 30,
         isIdealFirstDateValid = idealFirstDate.isNotEmpty(),

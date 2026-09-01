@@ -22,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +37,7 @@ import com.example.spectroom.R
 import com.example.spectroom.data.model.ProfileCard
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
 import com.example.spectroom.ui.theme.TabSelected
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,9 +49,22 @@ fun NewMessageComposeSheet(
     val colors = LocalSpectRoomColors.current
     var draft by remember { mutableStateOf("") }
     var showQuick by remember { mutableStateOf(false) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+
+    fun submitMessage() {
+        val text = draft.trim()
+        if (text.isEmpty()) return
+        scope.launch {
+            sheetState.hide()
+            onSend(text)
+            onDismiss()
+        }
+    }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = sheetState,
         containerColor = colors.background,
     ) {
         Column(
@@ -105,7 +120,7 @@ fun NewMessageComposeSheet(
             )
             Spacer(modifier = Modifier.height(16.dp))
             Button(
-                onClick = { onSend(draft) },
+                onClick = { submitMessage() },
                 enabled = draft.isNotBlank(),
                 modifier = Modifier
                     .fillMaxWidth()

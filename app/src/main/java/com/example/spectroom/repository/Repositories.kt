@@ -18,6 +18,7 @@ import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.UserProfileChangeRequest
+import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FirebaseFirestore
@@ -32,6 +33,25 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+
+private fun firestoreCreatedAtMillis(data: Map<String, Any>): Long? {
+    return when (val raw = data["createdAt"]) {
+        is Timestamp -> raw.toDate().time
+        is Number -> (raw.toDouble() * 1000.0).toLong()
+        else -> null
+    }
+}
+
+private suspend fun deleteFirestoreDocuments(
+    db: FirebaseFirestore,
+    documents: List<DocumentSnapshot>,
+) {
+    documents.chunked(450).forEach { chunk ->
+        val batch = db.batch()
+        chunk.forEach { batch.delete(it.reference) }
+        batch.commit().await()
+    }
+}
 
 sealed class AuthResult {
     data class Success(val user: FirebaseUser) : AuthResult()
@@ -63,6 +83,7 @@ data class SwipeFilterState(
 )
 
 data class IncomingMessageHint(
+    val messageDocId: String,
     val senderId: String,
     val preview: String,
     val type: String,
@@ -171,7 +192,7 @@ class AuthRepository(
         awaitClose { registration.remove() }
     }
 
-    suspend fun signUp(name: String, email: String, password: String): AuthResult {
+    suspend fun signUp(name: String, email: String, password: String, phoneE164: String): AuthResult {
         return try {
             val normalized = email.trim().lowercase()
             ensureEmailAllowedForAuth(normalized)
@@ -180,7 +201,7 @@ class AuthRepository(
             user.updateProfile(
                 UserProfileChangeRequest.Builder().setDisplayName(name.trim()).build(),
             ).await()
-            createIncompleteUserDocument(user.uid, name.trim(), normalized)
+            createIncompleteUserDocument(user.uid, name.trim(), normalized, phoneE164.trim())
             AuthResult.Success(user)
         } catch (e: Exception) {
             val normalized = email.trim().lowercase()
@@ -428,7 +449,12 @@ class AuthRepository(
         auth.signOut()
     }
 
-    private suspend fun createIncompleteUserDocument(uid: String, name: String, email: String) {
+    private suspend fun createIncompleteUserDocument(
+        uid: String,
+        name: String,
+        email: String,
+        phoneE164: String,
+    ) {
         val data = hashMapOf(
             "id" to UUID.randomUUID().toString(),
             "name" to name,
@@ -455,6 +481,9 @@ class AuthRepository(
             ),
             UserProfileStatus.FIRESTORE_KEY to UserProfileStatus.INCOMPLETE.rawValue,
         )
+        if (phoneE164.startsWith("+") && phoneE164.length >= 10) {
+            data["phoneE164"] = phoneE164
+        }
         db.collection("users").document(uid).set(data).await()
     }
 }
@@ -889,6 +918,38 @@ class DiscoverRepository(
         if (status == UserProfileStatus.INCOMPLETE.rawValue) return null
         return doc.toSpectRoomUser(doc.id)
     }
+
+    suspend fun deleteAllSwipes() {
+        val uid = auth.currentUser?.uid ?: error("Not signed in")
+        val snapshot = db.collection("users").document(uid).collection("swipes").get().await()
+        deleteFirestoreDocuments(db, snapshot.documents)
+    }
+
+    suspend fun deleteAllMatches() {
+        val uid = auth.currentUser?.uid ?: error("Not signed in")
+        val snapshot = db.collection("users").document(uid).collection("matches").get().await()
+        for (document in snapshot.documents) {
+            val data = document.data ?: continue
+            val user1Id = data["user1Id"] as? String
+            val user2Id = data["user2Id"] as? String
+            val batch = db.batch()
+            batch.delete(document.reference)
+            if (user1Id != null && user2Id != null) {
+                val otherUserId = if (user1Id == uid) user2Id else user1Id
+                val otherRef = db.collection("users").document(otherUserId)
+                    .collection("matches")
+                    .document(document.id)
+                batch.delete(otherRef)
+            }
+            batch.commit().await()
+        }
+    }
+
+    suspend fun deleteAllUserInteractions(messageRepository: MessageRepository) {
+        deleteAllSwipes()
+        deleteAllMatches()
+        messageRepository.deleteAllMessages()
+    }
 }
 
 class MatchRepository(
@@ -991,26 +1052,30 @@ class MessageRepository(
             return@callbackFlow
         }
         val registration = db.collection("users").document(uid).collection("incomingMessages")
-            .orderBy("createdAt", Query.Direction.DESCENDING)
-            .limit(1)
-            .addSnapshotListener { snapshot, _ ->
-                val data = snapshot?.documents?.firstOrNull()?.data
-                if (data == null) {
-                    trySend(null)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+                // iOS parity: ignore the initial cache snapshot of existing history.
+                if (snapshot.metadata.isFromCache && !snapshot.metadata.hasPendingWrites()) {
                     return@addSnapshotListener
                 }
-                val senderId = data["senderId"] as? String
-                if (senderId.isNullOrBlank()) {
-                    trySend(null)
-                    return@addSnapshotListener
+                val now = System.currentTimeMillis()
+                for (change in snapshot.documentChanges) {
+                    if (change.type != DocumentChange.Type.ADDED) continue
+                    val data = change.document.data ?: continue
+                    val senderId = data["senderId"] as? String
+                    if (senderId.isNullOrBlank() || senderId == uid) continue
+                    val createdAtMs = firestoreCreatedAtMillis(data) ?: continue
+                    val ageMs = now - createdAtMs
+                    if (ageMs > 30_000L || ageMs < -5_000L) continue
+                    trySend(
+                        IncomingMessageHint(
+                            messageDocId = change.document.id,
+                            senderId = senderId,
+                            preview = data["content"] as? String ?: "",
+                            type = data["type"] as? String ?: "text",
+                        ),
+                    )
                 }
-                trySend(
-                    IncomingMessageHint(
-                        senderId = senderId,
-                        preview = data["content"] as? String ?: "",
-                        type = data["type"] as? String ?: "text",
-                    ),
-                )
             }
         awaitClose { registration.remove() }
     }
@@ -1062,12 +1127,14 @@ class MessageRepository(
     }
 
     private suspend fun sendMessage(recipientId: String, content: String, type: String): String {
+        val normalizedRecipientId = recipientId.trim()
+        require(normalizedRecipientId.isNotEmpty()) { "Invalid recipient" }
         val uid = auth.currentUser?.uid ?: error("Not signed in")
         val messageId = UUID.randomUUID().toString()
         val payload = hashMapOf<String, Any?>(
             "id" to messageId,
             "senderId" to uid,
-            "recipientId" to recipientId,
+            "recipientId" to normalizedRecipientId,
             "content" to content,
             "type" to type,
             "createdAt" to Date().time / 1000.0,
@@ -1076,7 +1143,7 @@ class MessageRepository(
         )
         db.collection("users").document(uid).collection("sentMessages").document(messageId)
             .set(payload).await()
-        db.collection("users").document(recipientId).collection("incomingMessages").document(messageId)
+        db.collection("users").document(normalizedRecipientId).collection("incomingMessages").document(messageId)
             .set(payload).await()
         return messageId
     }
@@ -1137,7 +1204,9 @@ class MessageRepository(
             )?.let(merged::add)
         }
 
-        val newestFirst = merged.sortedByDescending { it.createdAt.time }
+        val newestFirst = merged
+            .distinctBy { it.id }
+            .sortedByDescending { it.createdAt.time }
         val page = newestFirst.take(limit).sortedBy { it.createdAt.time }
         val hasMoreOlder = newestFirst.size > limit || sent.size == limit || incoming.size == limit
         return ConversationMessagesPage(messages = page, hasMoreOlder = hasMoreOlder)
@@ -1303,7 +1372,7 @@ class MessageRepository(
     ): List<DocumentSnapshot> {
         return db.collection("users").document(userId).collection(collection)
             .whereEqualTo(filterField, filterValue)
-            .whereGreaterThan("createdAt", after.time / 1000.0)
+            .whereGreaterThan("createdAt", (after.time / 1000.0) - 0.001)
             .orderBy("createdAt", Query.Direction.ASCENDING)
             .get()
             .await()
@@ -1362,6 +1431,7 @@ class MessageRepository(
 
         val latestByPartner = linkedMapOf<String, Latest>()
         fun consider(partnerId: String, content: String, createdAt: Double, unread: Boolean) {
+            if (partnerId.isBlank()) return
             val existing = latestByPartner[partnerId]
             if (existing == null || existing.createdAt < createdAt) {
                 latestByPartner[partnerId] = Latest(partnerId, content, createdAt, unread)
@@ -1425,6 +1495,13 @@ class MessageRepository(
 
     suspend fun countUnreadIncomingMessages(): Int =
         fetchUnreadCountsBySender().values.sum()
+
+    suspend fun deleteAllMessages() {
+        val uid = auth.currentUser?.uid ?: error("Not signed in")
+        val incoming = db.collection("users").document(uid).collection("incomingMessages").get().await()
+        val sent = db.collection("users").document(uid).collection("sentMessages").get().await()
+        deleteFirestoreDocuments(db, incoming.documents + sent.documents)
+    }
 }
 
 class ModerationRepository(

@@ -7,12 +7,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -74,8 +74,8 @@ import com.example.spectroom.ui.screens.settings.ReportedProfilesSheet
 import com.example.spectroom.ui.screens.settings.ReportUserSheet
 import com.example.spectroom.ui.screens.settings.SettingsScreen
 import com.example.spectroom.ui.navigation.MainTab
+import com.example.spectroom.ui.theme.LocalSpectRoomColors
 import com.example.spectroom.ui.theme.SpectRoomTheme
-import com.example.spectroom.ui.theme.TabSelected
 import com.example.spectroom.viewmodel.AppDestination
 import com.example.spectroom.viewmodel.AppStateViewModel
 
@@ -91,6 +91,8 @@ fun SpectRoomApp(
     val addressSearchState by viewModel.addressSearchState.collectAsStateWithLifecycle()
     val showBlockedUsers by viewModel.showBlockedUsers.collectAsStateWithLifecycle()
     val reportTarget by viewModel.reportTarget.collectAsStateWithLifecycle()
+    val reportAfterBlock by viewModel.reportAfterBlock.collectAsStateWithLifecycle()
+    val showReportThankYou by viewModel.showReportThankYou.collectAsStateWithLifecycle()
     val infoSheet by viewModel.infoSheet.collectAsStateWithLifecycle()
     val showDeleteAccount by viewModel.showDeleteAccount.collectAsStateWithLifecycle()
     val deleteAccountSucceeded by viewModel.deleteAccountSucceeded.collectAsStateWithLifecycle()
@@ -202,11 +204,14 @@ fun SpectRoomApp(
         val link = pendingNotificationDeepLink ?: return@LaunchedEffect
         if (uiState.destination != AppDestination.MAIN) return@LaunchedEffect
         when (link) {
-            is NotificationDeepLink.Chat -> viewModel.openChat(
-                partnerId = link.userId,
-                partnerName = link.userName.ifBlank { "Match" },
-                partnerPhoto = link.userPhoto,
-            )
+            is NotificationDeepLink.Chat -> {
+                viewModel.suppressIncomingMessageSoundBriefly()
+                viewModel.openChat(
+                    partnerId = link.userId,
+                    partnerName = link.userName.ifBlank { "Match" },
+                    partnerPhoto = link.userPhoto,
+                )
+            }
             is NotificationDeepLink.Match -> viewModel.openMatchFromNotification(
                 userId = link.userId,
                 userName = link.userName.ifBlank { "Match" },
@@ -219,7 +224,9 @@ fun SpectRoomApp(
 
     ProvideAppLocale(languageCode = uiState.languageCode) {
         SpectRoomTheme(darkTheme = uiState.isDarkMode) {
-            when (uiState.destination) {
+            if (!uiState.hasResolvedAuthState && !uiState.isAuthenticated) {
+                LoadingScreen()
+            } else when (uiState.destination) {
             AppDestination.LOADING -> LoadingScreen()
             AppDestination.ONBOARDING -> OnboardingScreen(
                 onGetStarted = viewModel::completeOnboarding,
@@ -232,47 +239,73 @@ fun SpectRoomApp(
                     )
                 },
             )
-            AppDestination.AUTH -> Column(modifier = Modifier.fillMaxSize()) {
-                AuthFlowPreferenceBar(
-                    isDarkMode = uiState.isDarkMode,
-                    languageCode = uiState.languageCode,
-                    onToggleDarkMode = viewModel::toggleDarkMode,
-                    onLanguageClick = viewModel::showLanguagePicker,
-                )
-                Box(modifier = Modifier.weight(1f)) {
-                    AuthenticationScreen(
-                        isLoading = uiState.isAuthLoading,
-                        errorMessage = uiState.authError,
-                        noticeMessage = uiState.authNotice,
-                        onSignIn = viewModel::signIn,
-                        onSignUp = viewModel::signUp,
-                        onForgotPassword = viewModel::resetPassword,
-                        onClearError = viewModel::clearAuthError,
+            AppDestination.AUTH -> {
+                val colors = LocalSpectRoomColors.current
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(colors.background),
+                ) {
+                    AuthFlowPreferenceBar(
+                        isDarkMode = uiState.isDarkMode,
+                        languageCode = uiState.languageCode,
+                        onToggleDarkMode = viewModel::toggleDarkMode,
+                        onLanguageClick = viewModel::showLanguagePicker,
                     )
+                    Box(modifier = Modifier.weight(1f)) {
+                        AuthenticationScreen(
+                            isLoading = uiState.isAuthLoading,
+                            errorMessage = uiState.authError,
+                            noticeMessage = uiState.authNotice,
+                            onSignIn = viewModel::signIn,
+                            onSignUp = viewModel::signUp,
+                            onForgotPassword = viewModel::resetPassword,
+                            onClearError = viewModel::clearAuthError,
+                        )
+                    }
                 }
             }
-            AppDestination.MFA -> MfaVerificationScreen(
-                mode = uiState.mfaMode,
-                maskedPhone = uiState.mfaMaskedPhone,
-                emailAddress = uiState.mfaEmailAddress,
-                emailVerified = uiState.mfaEmailVerified,
-                resolvedPhoneE164 = uiState.mfaResolvedPhoneE164,
-                smsSent = uiState.mfaSmsSent,
-                smsFailed = uiState.mfaSmsFailed,
-                smsRateLimited = uiState.mfaSmsRateLimited,
-                editingPhone = uiState.mfaEditingPhone,
-                isLoading = uiState.isAuthLoading,
-                errorMessage = uiState.authError,
-                onSendVerificationEmail = viewModel::sendMfaVerificationEmail,
-                onCheckEmailVerified = viewModel::checkMfaEmailVerified,
-                onResolvePhone = viewModel::resolveMfaEnrollmentPhone,
-                onSaveMissingPhone = viewModel::saveMissingMfaPhone,
-                onSaveEditedPhone = viewModel::saveEditedMfaPhone,
-                onSetEditingPhone = viewModel::setMfaEditingPhone,
-                onSendCode = viewModel::sendMfaCode,
-                onConfirm = viewModel::confirmMfa,
-                onCancel = viewModel::cancelMfa,
-            )
+            AppDestination.MFA -> {
+                val colors = LocalSpectRoomColors.current
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(colors.background),
+                ) {
+                    AuthFlowPreferenceBar(
+                        isDarkMode = uiState.isDarkMode,
+                        languageCode = uiState.languageCode,
+                        onToggleDarkMode = viewModel::toggleDarkMode,
+                        onLanguageClick = viewModel::showLanguagePicker,
+                    )
+                    Box(modifier = Modifier.weight(1f)) {
+                        MfaVerificationScreen(
+                            mode = uiState.mfaMode,
+                            maskedPhone = uiState.mfaMaskedPhone,
+                            emailAddress = uiState.mfaEmailAddress,
+                            emailVerified = uiState.mfaEmailVerified,
+                            resolvedPhoneE164 = uiState.mfaResolvedPhoneE164,
+                            smsSent = uiState.mfaSmsSent,
+                            smsFailed = uiState.mfaSmsFailed,
+                            smsRateLimited = uiState.mfaSmsRateLimited,
+                            editingPhone = uiState.mfaEditingPhone,
+                            isLoading = uiState.isAuthLoading,
+                            errorMessage = uiState.authError,
+                            popupTitle = uiState.authPopupTitle,
+                            onSendVerificationEmail = viewModel::sendMfaVerificationEmail,
+                            onCheckEmailVerified = viewModel::checkMfaEmailVerified,
+                            onResolvePhone = viewModel::resolveMfaEnrollmentPhone,
+                            onSaveMissingPhone = viewModel::saveMissingMfaPhone,
+                            onSaveEditedPhone = viewModel::saveEditedMfaPhone,
+                            onSetEditingPhone = viewModel::setMfaEditingPhone,
+                            onSendCode = viewModel::sendMfaCode,
+                            onConfirm = viewModel::confirmMfa,
+                            onCancel = viewModel::cancelMfa,
+                            onClearError = viewModel::clearAuthError,
+                        )
+                    }
+                }
+            }
             AppDestination.MANDATORY_PROFILE -> ProfileEditScreen(
                 user = uiState.currentUser,
                 mandatory = true,
@@ -304,6 +337,8 @@ fun SpectRoomApp(
                                 ?: EnergyLevel.FULLY_SOCIAL,
                             profileIncomplete = !viewModel.isCurrentProfileComplete(),
                             onSwipe = viewModel::swipe,
+                            onProgrammaticSwipe = viewModel::requestProgrammaticSwipe,
+                            onProgrammaticSwipeComplete = viewModel::onProgrammaticSwipeComplete,
                             onUndo = viewModel::undoLastSwipe,
                             onSecondThoughts = viewModel::useSecondThoughts,
                             onOpenProfile = viewModel::openProfileDetail,
@@ -322,7 +357,12 @@ fun SpectRoomApp(
                             },
                             onMessageMatch = { match ->
                                 if (!viewModel.isMessagingBlocked(match.otherUser.userId)) {
-                                    viewModel.openComposeMessage(match.otherUser)
+                                    val user = match.otherUser
+                                    viewModel.openChat(
+                                        partnerId = user.userId,
+                                        partnerName = user.name,
+                                        partnerPhoto = user.imageURL,
+                                    )
                                 }
                             },
                             onExploreProfiles = { viewModel.setSelectedTab(2) },
@@ -333,17 +373,20 @@ fun SpectRoomApp(
                             ChatScreen(
                                 partnerName = uiState.activeChatPartnerName.orEmpty(),
                                 partnerPhotoUrl = uiState.activeChatPartnerPhoto,
-                                currentUserId = uiState.currentUser?.firebaseDocumentId,
+                                currentUserId = viewModel.messagingUserId(),
                                 messages = socialState.chatMessages,
                                 isLoadingMessages = socialState.isLoadingChatMessages,
                                 isSending = socialState.isSendingMessage,
                                 isRecording = uiState.isRecordingVoice,
+                                recordingDurationSeconds = uiState.recordingDurationSeconds,
                                 composerLocked = uiState.chatBlockedByPartner,
                                 hasMoreOlder = socialState.chatHasMoreOlder,
                                 isLoadingOlder = socialState.isLoadingOlderChat,
                                 hasPendingVoicePreview = uiState.hasPendingVoicePreview,
                                 pendingVoiceDuration = uiState.pendingVoicePreviewDuration,
                                 pendingVoicePath = uiState.pendingVoicePreviewPath,
+                                imageLocalPreviews = socialState.chatImageLocalPreviews,
+                                uploadingImageContentKey = socialState.uploadingImageContentKey,
                                 shouldShowPhotoWarning = viewModel.shouldShowPhotoShareWarning(),
                                 onPhotoWarningContinue = viewModel::setSkipPhotoShareWarning,
                                 onBack = viewModel::closeChat,
@@ -357,6 +400,7 @@ fun SpectRoomApp(
                                 onDiscardPendingVoice = viewModel::discardPendingVoicePreview,
                                 onPlayVoice = viewModel::playVoiceMessage,
                                 onOpenImage = viewModel::openChatImage,
+                                onIncomingImageDisplayed = viewModel::onIncomingChatImageDisplayed,
                                 onLoadOlder = viewModel::loadOlderChatMessages,
                                 onOpenPartnerProfile = {
                                     val id = uiState.activeChatPartnerId ?: return@ChatScreen
@@ -491,6 +535,7 @@ fun SpectRoomApp(
                             isAdmin = uiState.isAdmin,
                             onAdmin = viewModel::showAdminConsole,
                             onDeleteAccount = viewModel::showDeleteAccount,
+                            onResetUserData = viewModel::resetAllAppState,
                             onSignOut = viewModel::signOut,
                         )
                     },
@@ -543,6 +588,11 @@ fun SpectRoomApp(
         }
 
         uiState.viewingProfile?.let { profile ->
+            val blockFirstName = uiState.pendingBlockProfile
+                ?.takeIf { it.userId == profile.userId }
+                ?.let { pending ->
+                    pending.name.substringBefore(' ').ifBlank { pending.name }
+                }
             UserProfileModal(
                 profile = profile,
                 matchBreakdown = viewModel.matchBreakdownFor(profile),
@@ -558,16 +608,29 @@ fun SpectRoomApp(
                 },
                 onOpenPhotos = viewModel::openPhotoViewer,
                 onRefresh = viewModel::refreshViewingProfile,
+                blockConfirmationFirstName = blockFirstName,
+                onDismissBlockConfirmation = viewModel::dismissBlockConfirmation,
+                onConfirmBlockOnly = viewModel::confirmBlockOnly,
+                onConfirmBlockAndReport = viewModel::confirmBlockAndReport,
+                onCompleteBlockConfirmation = viewModel::completeBlockConfirmation,
+                showBlockReport = reportAfterBlock && reportTarget?.userId == profile.userId,
+                showReportThankYou = showReportThankYou,
+                onSubmitBlockReport = viewModel::submitBlockReport,
+                onCancelBlockReport = viewModel::finishBlockReportFlow,
+                onDismissReportThankYou = viewModel::finishBlockReportFlow,
             )
         }
 
         uiState.pendingBlockProfile?.let { profile ->
-            BlockConfirmationOverlay(
-                firstName = profile.name.substringBefore(' ').ifBlank { profile.name },
-                onDismiss = viewModel::dismissBlockConfirmation,
-                onBlock = viewModel::confirmBlockOnly,
-                onBlockAndReport = viewModel::confirmBlockAndReport,
-            )
+            if (uiState.viewingProfile?.userId != profile.userId) {
+                BlockConfirmationOverlay(
+                    firstName = profile.name.substringBefore(' ').ifBlank { profile.name },
+                    onDismiss = viewModel::dismissBlockConfirmation,
+                    onBlock = viewModel::confirmBlockOnly,
+                    onBlockAndReport = viewModel::confirmBlockAndReport,
+                    onBlockComplete = viewModel::completeBlockConfirmation,
+                )
+            }
         }
 
         if (addressSearchState.visible) {
@@ -589,12 +652,15 @@ fun SpectRoomApp(
         }
 
         reportTarget?.let { target ->
-            ReportUserSheet(
-                userName = target.name,
-                categories = ModerationRepository.reportCategories,
-                onSubmit = viewModel::submitReport,
-                onDismiss = viewModel::hideReport,
-            )
+            val showInProfile = reportAfterBlock && uiState.viewingProfile?.userId == target.userId
+            if (!showInProfile) {
+                ReportUserSheet(
+                    userName = target.name,
+                    categories = ModerationRepository.reportCategories,
+                    onSubmit = viewModel::submitReport,
+                    onDismiss = viewModel::hideReport,
+                )
+            }
         }
 
         when (infoSheet) {
@@ -697,12 +763,12 @@ fun SpectRoomApp(
 
 @Composable
 private fun LoadingScreen() {
+    val colors = LocalSpectRoomColors.current
     Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-    ) {
-        CircularProgressIndicator(color = TabSelected)
-    }
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colors.background),
+    )
 }
 
 @Composable

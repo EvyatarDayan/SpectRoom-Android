@@ -33,25 +33,24 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -63,16 +62,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -91,8 +97,10 @@ import com.example.spectroom.ui.theme.LikeRed
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
 import com.example.spectroom.ui.theme.OutgoingChatBubble
 import com.example.spectroom.ui.theme.TabSelected
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.yield
 
 @Composable
 fun ChatScreen(
@@ -103,12 +111,15 @@ fun ChatScreen(
     isLoadingMessages: Boolean = false,
     isSending: Boolean,
     isRecording: Boolean,
+    recordingDurationSeconds: Double = 0.0,
     composerLocked: Boolean = false,
     hasMoreOlder: Boolean = false,
     isLoadingOlder: Boolean = false,
     hasPendingVoicePreview: Boolean = false,
     pendingVoiceDuration: Double = 0.0,
     pendingVoicePath: String? = null,
+    imageLocalPreviews: Map<String, String> = emptyMap(),
+    uploadingImageContentKey: String? = null,
     shouldShowPhotoWarning: Boolean = true,
     onPhotoWarningContinue: (dontShowAgain: Boolean) -> Unit = {},
     onBack: () -> Unit,
@@ -122,6 +133,7 @@ fun ChatScreen(
     onDiscardPendingVoice: () -> Unit = {},
     onPlayVoice: (String) -> Unit = {},
     onOpenImage: (String) -> Unit = {},
+    onIncomingImageDisplayed: (String) -> Unit = {},
     onLoadOlder: () -> Unit = {},
     onOpenPartnerProfile: () -> Unit = {},
     onBlock: () -> Unit = {},
@@ -145,6 +157,8 @@ fun ChatScreen(
     var showMicLongPressTip by remember { mutableStateOf(false) }
     var expandedLongMessageIds by remember { mutableStateOf(setOf<String>()) }
     var pinToBottomOnOpen by remember(partnerName) { mutableStateOf(true) }
+    var previousTailMessageId by remember(partnerName) { mutableStateOf<String?>(null) }
+    var stickToBottomTrigger by remember(partnerName) { mutableIntStateOf(0) }
 
     fun conversationBottomIndex(): Int {
         val loadingOffset = if (isLoadingOlder) 1 else 0
@@ -179,27 +193,45 @@ fun ChatScreen(
         pinToBottomOnOpen = true
     }
 
-    LaunchedEffect(messages.size, isLoadingMessages, isLoadingOlder, pinToBottomOnOpen) {
+    LaunchedEffect(messages.size, messages.lastOrNull()?.id, isLoadingMessages, isLoadingOlder, pinToBottomOnOpen) {
+        val tailMessageId = messages.lastOrNull()?.id
+        val receivedNewMessage = tailMessageId != null &&
+            previousTailMessageId != null &&
+            tailMessageId != previousTailMessageId &&
+            !isLoadingOlder
         val preserve = pendingScrollPreserve
         if (preserve != null) {
             pendingScrollPreserve = null
             val loadingOffset = if (isLoadingOlder) 1 else 0
-            listState.scrollToItem(
-                index = (preserve.first + (messages.size - preserve.second) + loadingOffset).coerceAtLeast(0),
-            )
+            val targetIndex = (preserve.first + (messages.size - preserve.second) + loadingOffset)
+                .coerceIn(0, (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
+            if (listState.layoutInfo.totalItemsCount > targetIndex) {
+                listState.scrollToItem(targetIndex)
+            }
+            previousTailMessageId = tailMessageId
             return@LaunchedEffect
         }
-        if (messages.isEmpty() || isLoadingMessages) return@LaunchedEffect
-
-        val bottomIndex = conversationBottomIndex()
-        if (pinToBottomOnOpen) {
-            snapshotFlow { listState.layoutInfo.totalItemsCount }
-                .first { it > bottomIndex }
-            listState.scrollToItem(bottomIndex)
-            pinToBottomOnOpen = false
-        } else if (isAtBottom.value) {
-            listState.animateScrollToItem(bottomIndex)
+        if (messages.isEmpty() || isLoadingMessages) {
+            previousTailMessageId = tailMessageId
+            return@LaunchedEffect
         }
+
+        when {
+            pinToBottomOnOpen -> {
+                listState.scheduleScrollToBottom(animated = false)
+                pinToBottomOnOpen = false
+            }
+            receivedNewMessage || isAtBottom.value -> {
+                listState.scheduleScrollToBottom(animated = true)
+                stickToBottomTrigger++
+            }
+        }
+        previousTailMessageId = tailMessageId
+    }
+
+    LaunchedEffect(stickToBottomTrigger) {
+        if (stickToBottomTrigger == 0 || messages.isEmpty() || isLoadingMessages) return@LaunchedEffect
+        listState.scheduleScrollToBottom(animated = false)
     }
 
     LaunchedEffect(listState.firstVisibleItemIndex, hasMoreOlder, isLoadingOlder) {
@@ -259,14 +291,25 @@ fun ChatScreen(
                         ChatDateSeparator(title = chatDayTitle(message.createdAt))
                     }
                     val outgoing = message.senderId == currentUserId
+                    val localImageUri = imageLocalPreviews[message.content]
+                    val isImageUploading = message.content == uploadingImageContentKey
+                    val isLastMessage = message.id == messages.lastOrNull()?.id
                     ChatMessageRow(
                         message = message,
                         outgoing = outgoing,
+                        localImageUri = localImageUri,
+                        isImageUploading = isImageUploading,
                         expandedLongMessageIds = expandedLongMessageIds,
                         onExpandLongMessage = { id ->
                             expandedLongMessageIds = expandedLongMessageIds + id
                         },
                         onOpenImage = onOpenImage,
+                        onIncomingImageDisplayed = onIncomingImageDisplayed,
+                        onContentLayout = if (isLastMessage) {
+                            { stickToBottomTrigger++ }
+                        } else {
+                            null
+                        },
                     )
                 }
                 item(key = CONVERSATION_BOTTOM_ANCHOR_KEY) {
@@ -287,35 +330,12 @@ fun ChatScreen(
                     .padding(horizontal = 16.dp, vertical = 14.dp),
                 textAlign = TextAlign.Center,
             )
-        } else if (isRecording) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(LikeRed.copy(alpha = 0.12f))
-                    .navigationBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Recording…", color = LikeRed, modifier = Modifier.weight(1f))
-                Text(
-                    "Cancel",
-                    color = colors.secondaryText,
-                    modifier = Modifier
-                        .clickable(onClick = onCancelRecording)
-                        .padding(end = 16.dp),
-                )
-                Text(
-                    "Stop",
-                    color = TabSelected,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.clickable(onClick = onStopRecordingAndSend),
-                )
-            }
         } else {
             ChatComposerBar(
                 draft = draft,
                 onDraftChange = { draft = it },
                 isSending = isSending,
+                isRecording = isRecording,
                 onSend = {
                     onSend(draft)
                     draft = ""
@@ -342,16 +362,7 @@ fun ChatScreen(
     }
 
     if (showMicLongPressTip) {
-        AlertDialog(
-            onDismissRequest = { showMicLongPressTip = false },
-            title = { Text(stringResource(R.string.messages_voice_long_press_tip_title)) },
-            text = { Text(stringResource(R.string.messages_voice_long_press_tip_message)) },
-            confirmButton = {
-                TextButton(onClick = { showMicLongPressTip = false }) {
-                    Text(stringResource(R.string.messages_voice_long_press_tip_got_it))
-                }
-            },
-        )
+        VoiceLongPressTipOverlay(onDismiss = { showMicLongPressTip = false })
     }
 
     if (showQuickMessages) {
@@ -376,6 +387,14 @@ fun ChatScreen(
         )
     }
 
+    if (isRecording) {
+        VoiceRecordingIndicatorSheet(
+            durationSeconds = recordingDurationSeconds,
+            onDone = onStopRecordingAndSend,
+            onDelete = onCancelRecording,
+        )
+    }
+
     if (hasPendingVoicePreview) {
         VoiceRecordingPreviewSheet(
             durationSeconds = pendingVoiceDuration,
@@ -392,6 +411,42 @@ private const val MIC_LONG_PRESS_MS = 1_000L
 private const val COMPOSER_MIN_HEIGHT_DP = 36
 private const val COMPOSER_MAX_LINES = 4
 private const val CONVERSATION_BOTTOM_ANCHOR_KEY = "conversation_bottom_anchor"
+
+private suspend fun LazyListState.scheduleScrollToBottom(animated: Boolean) {
+    val delays = if (animated) listOf(0L, 50L, 200L, 500L, 800L) else listOf(0L, 80L, 200L, 500L, 800L)
+    for ((index, delayMs) in delays.withIndex()) {
+        if (delayMs > 0) delay(delayMs)
+        scrollToBottomFully(animated = animated && index == 0)
+    }
+}
+
+private suspend fun LazyListState.scrollToBottomFully(animated: Boolean) {
+    withTimeoutOrNull(500) {
+        snapshotFlow { layoutInfo.totalItemsCount }
+            .first { it > 0 }
+    }
+    val lastIndex = (layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+    if (layoutInfo.totalItemsCount <= 0) return
+
+    if (animated) {
+        animateScrollToItem(lastIndex)
+    } else {
+        scrollToItem(lastIndex)
+    }
+
+    pinScrollToBottomEnd()
+    yield()
+    pinScrollToBottomEnd()
+}
+
+private suspend fun LazyListState.pinScrollToBottomEnd() {
+    val viewportHeight = (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset).toFloat()
+    scroll {
+        while (canScrollForward) {
+            scrollBy(viewportHeight)
+        }
+    }
+}
 
 @Composable
 private fun ChatLoadingView() {
@@ -432,7 +487,12 @@ private fun ChatEmptyConversationView(
                 .border(1.dp, TabSelected.copy(0.18f), CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            Text("💬", fontSize = 48.sp)
+            Icon(
+                painter = painterResource(R.drawable.ic_chat_empty_bubble),
+                contentDescription = null,
+                modifier = Modifier.size(48.dp),
+                tint = Color.Unspecified,
+            )
         }
         Spacer(modifier = Modifier.height(12.dp))
         Text(
@@ -444,11 +504,40 @@ private fun ChatEmptyConversationView(
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = stringResource(R.string.messages_no_messages_found_body),
+            text = stringResource(R.string.messages_no_messages_found_body).trimEnd(),
             fontSize = 15.sp,
             color = colors.text,
             textAlign = TextAlign.Center,
-            modifier = Modifier.clickable(onClick = onQuickMessage),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        val quickMessagesLink = stringResource(R.string.messages_no_messages_found_quick_messages)
+        val linkText = buildAnnotatedString {
+            append("from\u00A0")
+            pushStringAnnotation(tag = "quick_messages", annotation = "quick_messages")
+            withStyle(
+                SpanStyle(
+                    color = TabSelected,
+                    textDecoration = TextDecoration.Underline,
+                ),
+            ) {
+                append(quickMessagesLink)
+            }
+            pop()
+            append(".")
+        }
+        ClickableText(
+            text = linkText,
+            style = TextStyle(
+                fontSize = 15.sp,
+                color = colors.text,
+                textAlign = TextAlign.Center,
+            ),
+            modifier = Modifier.fillMaxWidth(),
+            onClick = { offset ->
+                linkText.getStringAnnotations(tag = "quick_messages", start = offset, end = offset)
+                    .firstOrNull()
+                    ?.let { onQuickMessage() }
+            },
         )
     }
 }
@@ -456,16 +545,21 @@ private fun ChatEmptyConversationView(
 @Composable
 private fun ChatWallpaperBackground() {
     val colors = LocalSpectRoomColors.current
+    val context = LocalContext.current
+    val wallpaperRes = if (colors.isDark) R.drawable.chat_back_dark else R.drawable.chat_back
+    val hasWallpaper = remember(wallpaperRes) {
+        runCatching { context.resources.getResourceName(wallpaperRes) }.isSuccess
+    }
     Box(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.fillMaxSize().background(colors.background))
-        Image(
-            painter = painterResource(
-                if (colors.isDark) R.drawable.chat_back_dark else R.drawable.chat_back,
-            ),
-            contentDescription = null,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop,
-        )
+        if (hasWallpaper) {
+            Image(
+                painter = painterResource(wallpaperRes),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        }
     }
 }
 
@@ -489,12 +583,21 @@ private fun ChatHeader(
             .padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onBack) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .shadow(2.dp, CircleShape, clip = false, ambientColor = Color.Black.copy(alpha = 0.08f))
+                .clip(CircleShape)
+                .border(1.dp, colors.border, CircleShape)
+                .background(colors.card)
+                .clickable(onClick = onBack),
+            contentAlignment = Alignment.Center,
+        ) {
             Icon(
                 Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = "Back",
                 tint = colors.text,
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier.size(20.dp),
             )
         }
         Row(
@@ -548,21 +651,26 @@ private fun ChatHeader(
                 )
             }
         }
-        TextButton(
-            onClick = onQuickMessage,
-            enabled = !composerLocked,
-            modifier = Modifier.defaultMinSize(minWidth = 1.dp, minHeight = 1.dp),
+        Row(
+            modifier = Modifier
+                .shadow(2.dp, RoundedCornerShape(50), clip = false, ambientColor = Color.Black.copy(alpha = 0.08f))
+                .clip(RoundedCornerShape(50))
+                .border(1.dp, colors.border, RoundedCornerShape(50))
+                .background(colors.card)
+                .clickable(enabled = !composerLocked, onClick = onQuickMessage)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Icon(
-                imageVector = Icons.Filled.ChatBubbleOutline,
+                painter = painterResource(R.drawable.ic_text_bubble),
                 contentDescription = null,
-                tint = TabSelected,
+                tint = colors.text,
                 modifier = Modifier.size(16.dp),
             )
-            Spacer(modifier = Modifier.size(4.dp))
             Text(
                 text = stringResource(R.string.matches_pre_message_button_short),
-                color = TabSelected,
+                color = colors.text,
                 fontSize = 15.sp,
                 maxLines = 1,
             )
@@ -593,13 +701,109 @@ private fun ChatDateSeparator(title: String) {
     }
 }
 
+private val CHAT_IMAGE_BUBBLE_SIZE = 150.dp
+
+@Composable
+private fun ChatImageLoadingPlaceholder() {
+    Box(
+        modifier = Modifier
+            .size(CHAT_IMAGE_BUBBLE_SIZE)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color.Gray.copy(alpha = 0.12f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(28.dp),
+            color = TabSelected,
+            strokeWidth = 2.5.dp,
+        )
+    }
+}
+
+@Composable
+private fun ChatImageMessageContent(
+    imageModel: Any?,
+    isImageUploading: Boolean,
+    isIncoming: Boolean,
+    messageKey: String,
+    canOpenImage: Boolean,
+    onOpenImage: (String) -> Unit,
+    remoteContent: String,
+    onContentLayout: (() -> Unit)?,
+    onIncomingImageDisplayed: (String) -> Unit,
+) {
+    var isReady by remember(imageModel) { mutableStateOf(false) }
+    var hasNotifiedIncoming by remember(messageKey) { mutableStateOf(false) }
+
+    fun notifyIncomingIfNeeded() {
+        if (!isIncoming || hasNotifiedIncoming) return
+        hasNotifiedIncoming = true
+        onIncomingImageDisplayed(messageKey)
+    }
+
+    Box(
+        modifier = Modifier
+            .size(CHAT_IMAGE_BUBBLE_SIZE)
+            .clip(RoundedCornerShape(10.dp))
+            .then(
+                if (canOpenImage) {
+                    Modifier.clickable { onOpenImage(remoteContent) }
+                } else {
+                    Modifier
+                },
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (!isReady) {
+            ChatImageLoadingPlaceholder()
+        }
+        AsyncImage(
+            model = imageModel,
+            contentDescription = "Image message",
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .size(CHAT_IMAGE_BUBBLE_SIZE)
+                .alpha(if (isReady) 1f else 0f)
+                .onSizeChanged { size ->
+                    if (isReady && size.height > 0) onContentLayout?.invoke()
+                },
+            onSuccess = {
+                isReady = true
+                notifyIncomingIfNeeded()
+                onContentLayout?.invoke()
+            },
+            onError = {
+                notifyIncomingIfNeeded()
+            },
+        )
+        if (isImageUploading) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Color.Black.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(28.dp),
+                    color = Color.White,
+                    strokeWidth = 2.5.dp,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun ChatMessageRow(
     message: MessageDisplay,
     outgoing: Boolean,
+    localImageUri: String? = null,
+    isImageUploading: Boolean = false,
     expandedLongMessageIds: Set<String>,
     onExpandLongMessage: (String) -> Unit,
     onOpenImage: (String) -> Unit,
+    onIncomingImageDisplayed: (String) -> Unit = {},
+    onContentLayout: (() -> Unit)? = null,
 ) {
     val colors = LocalSpectRoomColors.current
     val bubbleColor = if (outgoing) OutgoingChatBubble else IncomingChatBubble
@@ -613,40 +817,46 @@ private fun ChatMessageRow(
     ) {
         val alignment = if (outgoing) Alignment.CenterEnd else Alignment.CenterStart
         when (message.messageType) {
-            MessageType.IMAGE -> Box(
-                modifier = Modifier
-                    .align(alignment)
-                    .widthIn(max = 240.dp)
-                    .clip(bubbleShape)
-                    .background(bubbleColor, bubbleShape)
-                    .padding(
-                        start = if (outgoing) 0.dp else 7.dp,
-                        end = if (outgoing) 7.dp else 0.dp,
-                        top = 3.dp,
-                        bottom = 3.dp,
-                    ),
-            ) {
-                AsyncImage(
-                    model = message.content,
-                    contentDescription = "Image message",
-                    contentScale = ContentScale.Crop,
+            MessageType.IMAGE -> {
+                val isPendingImage = message.content.startsWith("pending://")
+                val imageModel = localImageUri ?: message.content
+                val canOpenImage = !isPendingImage && !isImageUploading
+                Box(
                     modifier = Modifier
-                        .widthIn(max = 234.dp)
-                        .height(220.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { onOpenImage(message.content) },
-                )
-                Text(
-                    text = timeText,
-                    fontSize = 11.sp,
-                    color = Color.White,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(6.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(Color.Black.copy(alpha = 0.45f))
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                )
+                        .align(alignment)
+                        .widthIn(max = 156.dp)
+                        .clip(bubbleShape)
+                        .background(bubbleColor, bubbleShape)
+                        .padding(
+                            start = if (outgoing) 0.dp else 7.dp,
+                            end = if (outgoing) 7.dp else 0.dp,
+                            top = 3.dp,
+                            bottom = 3.dp,
+                        ),
+                ) {
+                    ChatImageMessageContent(
+                        imageModel = imageModel,
+                        isImageUploading = isImageUploading,
+                        isIncoming = !outgoing,
+                        messageKey = message.deduplicationKey,
+                        canOpenImage = canOpenImage,
+                        onOpenImage = onOpenImage,
+                        remoteContent = message.content,
+                        onContentLayout = onContentLayout,
+                        onIncomingImageDisplayed = onIncomingImageDisplayed,
+                    )
+                    Text(
+                        text = timeText,
+                        fontSize = 11.sp,
+                        color = Color.White,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(6.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(Color.Black.copy(alpha = 0.45f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
             }
             MessageType.VOICE -> VoiceMessagePlayer(
                 audioUrl = message.content,
@@ -717,6 +927,7 @@ private fun ChatComposerBar(
     draft: String,
     onDraftChange: (String) -> Unit,
     isSending: Boolean,
+    isRecording: Boolean = false,
     onSend: () -> Unit,
     onAttachImage: () -> Unit,
     onRequestStartRecording: () -> Unit,
@@ -814,6 +1025,13 @@ private fun ChatComposerBar(
             Box(
                 modifier = Modifier
                     .size(34.dp)
+                    .then(
+                        if (isRecording) {
+                            Modifier.border(2.dp, LikeRed.copy(alpha = 0.4f), CircleShape)
+                        } else {
+                            Modifier
+                        },
+                    )
                     .pointerInput(isSending) {
                         if (isSending) return@pointerInput
                         awaitEachGesture {
@@ -834,7 +1052,7 @@ private fun ChatComposerBar(
                 Icon(
                     imageVector = Icons.Filled.Mic,
                     contentDescription = "Voice",
-                    tint = colors.text,
+                    tint = if (isRecording) LikeRed else colors.text,
                     modifier = Modifier.size(20.dp),
                 )
             }
