@@ -129,9 +129,9 @@
     <string name="settings_distance_50km">50 km</string>
     <string name="settings_distance_unlimited">Rajoittamaton</string>
     <string name="discover_empty">Näyttää siltä, että olet saavuttanut kaikki lähellä olevat. Yritä laajentaa hakusädettäsi.</string>
-    <string name="discover_incomplete_title">Finish your profile</string>
-    <string name="discover_incomplete_body">Complete your profile to start discovering people nearby.</string>
-    <string name="discover_incomplete_cta">Finish My Profile</string>
+    <string name="discover_incomplete_title">Olet yhden askeleen päässä</string>
+    <string name="discover_incomplete_body">Perusasetusten lisääminen varmistaa, että näytämme sinulle osumia, jotka todella vastaavat etsimääsi.</string>
+    <string name="discover_incomplete_cta">Viimeistele profiilini</string>
     <string name="matches_energy_today">%1$s tänään</string>
     <string name="mfa_sign_out_start_over">Sign out &amp; start over</string>
     <string name="match_its_a_match">It\'s a match!</string>

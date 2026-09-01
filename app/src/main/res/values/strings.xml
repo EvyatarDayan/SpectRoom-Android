@@ -416,8 +416,8 @@
     <string name="settings_distance_50km">50 km</string>
     <string name="settings_distance_unlimited">Unlimited</string>
     <string name="discover_empty">Looks like you\'ve reached everyone nearby. Try expanding your search radius.</string>
-    <string name="discover_incomplete_title">Finish your profile</string>
-    <string name="discover_incomplete_body">Complete your profile to start discovering people nearby.</string>
+    <string name="discover_incomplete_title">You\'re One Step Away</string>
+    <string name="discover_incomplete_body">Adding your basic preferences ensures we show you matches that actually fit what you\'re looking for.</string>
     <string name="discover_incomplete_cta">Finish My Profile</string>
     <string name="matches_energy_today">%1$s today</string>
     <string name="match_its_a_match">It\'s a match!</string>

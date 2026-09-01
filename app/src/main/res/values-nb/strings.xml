@@ -129,9 +129,9 @@
     <string name="settings_distance_50km">50 km</string>
     <string name="settings_distance_unlimited">Ubegrenset</string>
     <string name="discover_empty">Det ser ut til at du har nådd alle i nærheten. Prøv å utvide søkeradiusen.</string>
-    <string name="discover_incomplete_title">Finish your profile</string>
-    <string name="discover_incomplete_body">Complete your profile to start discovering people nearby.</string>
-    <string name="discover_incomplete_cta">Finish My Profile</string>
+    <string name="discover_incomplete_title">Du er ett skritt unna</string>
+    <string name="discover_incomplete_body">Ved å legge til dine grunnleggende preferanser sikrer du at vi viser deg kamper som faktisk passer til det du leter etter.</string>
+    <string name="discover_incomplete_cta">Fullfør min profil</string>
     <string name="matches_energy_today">%1$s i dag</string>
     <string name="mfa_sign_out_start_over">Sign out &amp; start over</string>
     <string name="match_its_a_match">It\'s a match!</string>

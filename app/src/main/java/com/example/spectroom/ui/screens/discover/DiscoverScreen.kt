@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -43,7 +44,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -1287,32 +1287,56 @@ private fun SwipeStamp(text: String, color: Color, modifier: Modifier = Modifier
 @Composable
 private fun IncompleteProfileCard(onFinishProfile: () -> Unit) {
     val colors = LocalSpectRoomColors.current
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(colors.card)
-            .border(1.dp, colors.border, RoundedCornerShape(24.dp))
-            .padding(28.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .height(CardHeight)
+            .shadow(
+                elevation = 16.dp,
+                shape = RoundedCornerShape(CardCorner),
+                ambientColor = Color.Black.copy(alpha = 0.12f),
+                spotColor = Color.Black.copy(alpha = 0.12f),
+            )
+            .clip(RoundedCornerShape(CardCorner))
+            .background(colors.card),
+        contentAlignment = Alignment.Center,
     ) {
-        Text(
-            stringResource(R.string.discover_incomplete_title),
-            fontWeight = FontWeight.Bold,
-            fontSize = 22.sp,
-            color = colors.text,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            stringResource(R.string.discover_incomplete_body),
-            color = colors.secondaryText,
-            fontSize = 14.sp,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        TextButton(onClick = onFinishProfile) {
-            Text(stringResource(R.string.discover_incomplete_cta), color = DistanceAccent)
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(24.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.discover_incomplete_title),
+                fontWeight = FontWeight.Bold,
+                fontSize = 24.sp,
+                color = colors.text,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 28.dp),
+            )
+            Text(
+                text = stringResource(R.string.discover_incomplete_body),
+                fontWeight = FontWeight.Medium,
+                fontSize = 17.sp,
+                color = colors.secondaryText,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 28.dp),
+            )
+            Box(
+                modifier = Modifier
+                    .defaultMinSize(minWidth = 140.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(TabSelected)
+                    .clickable(onClick = onFinishProfile)
+                    .padding(horizontal = 28.dp, vertical = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = stringResource(R.string.discover_incomplete_cta),
+                    color = Color.White,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
     }
 }

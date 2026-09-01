@@ -129,9 +129,9 @@
     <string name="settings_distance_50km">50 km</string>
     <string name="settings_distance_unlimited">Ubegrænset</string>
     <string name="discover_empty">Det ser ud til, at du har nået alle i nærheden. Prøv at udvide din søgeradius.</string>
-    <string name="discover_incomplete_title">Finish your profile</string>
-    <string name="discover_incomplete_body">Complete your profile to start discovering people nearby.</string>
-    <string name="discover_incomplete_cta">Finish My Profile</string>
+    <string name="discover_incomplete_title">Du er et skridt væk</string>
+    <string name="discover_incomplete_body">Tilføjelse af dine grundlæggende præferencer sikrer, at vi viser dig kampe, der rent faktisk passer til det, du leder efter.</string>
+    <string name="discover_incomplete_cta">Afslut min profil</string>
     <string name="matches_energy_today">%1$s i dag</string>
     <string name="mfa_sign_out_start_over">Sign out &amp; start over</string>
     <string name="match_its_a_match">It\'s a match!</string>

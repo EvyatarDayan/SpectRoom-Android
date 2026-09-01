@@ -129,9 +129,9 @@
     <string name="settings_distance_50km">50 km</string>
     <string name="settings_distance_unlimited">Ilimitado</string>
     <string name="discover_empty">Parece que ya has visto a todos los cercanos. Prueba a ampliar tu radio de búsqueda.</string>
-    <string name="discover_incomplete_title">Finish your profile</string>
-    <string name="discover_incomplete_body">Complete your profile to start discovering people nearby.</string>
-    <string name="discover_incomplete_cta">Finish My Profile</string>
+    <string name="discover_incomplete_title">Estás a un paso</string>
+    <string name="discover_incomplete_body">Añadir tus preferencias básicas nos permite mostrarte coincidencias que realmente encajan con lo que buscas.</string>
+    <string name="discover_incomplete_cta">Completar mi perfil</string>
     <string name="matches_energy_today">%1$s hoy</string>
     <string name="mfa_sign_out_start_over">Sign out &amp; start over</string>
     <string name="match_its_a_match">It\'s a match!</string>
