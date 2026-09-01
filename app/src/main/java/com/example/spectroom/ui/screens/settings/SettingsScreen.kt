@@ -3,6 +3,7 @@ package com.example.spectroom.ui.screens.settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -57,7 +58,10 @@ import com.example.spectroom.ui.theme.TabSelected
 
 private val SectionCorner = 12.dp
 private val SettingsTitleTopPadding = 12.dp
+private val SettingsTitleLineHeight = 40.dp
 private val SettingsTitleBottomPadding = 20.dp
+private val SettingsTitleBarReserve =
+    SettingsTitleTopPadding + SettingsTitleLineHeight + SettingsTitleBottomPadding
 private val SectionTitleBottomPadding = 8.dp
 private val RowVerticalPadding = 14.dp
 private val IconSize = 24.dp
@@ -88,26 +92,25 @@ fun SettingsScreen(
     val language = AppLanguage.fromCode(languageCode)
     val isDebugBuild = (LocalContext.current.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
-            .statusBarsPadding()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp)
-            .padding(bottom = TabBarMainContentInset),
+            .background(colors.background),
     ) {
-        Text(
-            text = stringResource(R.string.settings_title),
-            fontWeight = FontWeight.Bold,
-            fontSize = 28.sp,
-            color = colors.text,
-            textAlign = TextAlign.Center,
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = SettingsTitleTopPadding, bottom = SettingsTitleBottomPadding),
-        )
+                .fillMaxSize()
+                .statusBarsPadding(),
+        ) {
+            Spacer(modifier = Modifier.height(SettingsTitleBarReserve))
 
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp),
+            ) {
         SettingsSection(title = stringResource(R.string.settings_section_preferences)) {
             SettingsCard {
                 SettingsToggleRow(
@@ -250,7 +253,31 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(20.dp))
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            Spacer(modifier = Modifier.height(TabBarMainContentInset))
+        }
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(
+                    top = SettingsTitleTopPadding,
+                    bottom = SettingsTitleBottomPadding,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = stringResource(R.string.settings_title),
+                fontWeight = FontWeight.Bold,
+                fontSize = 28.sp,
+                color = colors.text,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 

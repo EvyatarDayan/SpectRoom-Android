@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,8 +28,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.example.spectroom.R
 import com.example.spectroom.data.model.AppLanguage
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
@@ -44,16 +41,8 @@ fun LanguagePickerSheet(
 ) {
     val colors = LocalSpectRoomColors.current
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(colors.background)
-                .statusBarsPadding(),
-        ) {
+    SettingsFullScreenSheet(onDismiss = onDismiss) {
+        SettingsSheetColumn {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()

@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -43,8 +42,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.example.spectroom.R
 import com.example.spectroom.data.model.SupportTopic
 import com.example.spectroom.ui.theme.LikeRed
@@ -74,16 +71,8 @@ fun HelpSupportSheet(
     val showMinWarning = didAttemptSend && !sendSucceeded && trimmed.length < 20
     val topics = lockedTopic?.let { listOf(it) } ?: SupportTopic.selectableDefault
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(colors.background)
-                .statusBarsPadding(),
-        ) {
+    SettingsFullScreenSheet(onDismiss = onDismiss) {
+        SettingsSheetColumn {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -94,7 +83,7 @@ fun HelpSupportSheet(
                     color = colors.text,
                     fontSize = 15.sp,
                     modifier = Modifier
-                        .align(Alignment.CenterStart)
+                        .align(Alignment.CenterEnd)
                         .clip(RoundedCornerShape(50))
                         .border(1.dp, colors.border, RoundedCornerShape(50))
                         .background(colors.card)

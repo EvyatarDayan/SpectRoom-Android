@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -41,8 +40,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
 import com.example.spectroom.R
 import com.example.spectroom.data.model.BlockedUser
@@ -61,17 +58,8 @@ fun BlockedUsersSheet(
     val colors = LocalSpectRoomColors.current
     var pendingUnblock by remember { mutableStateOf<BlockedUser?>(null) }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(colors.background)
-                .statusBarsPadding(),
-        ) {
-            Column(modifier = Modifier.fillMaxSize()) {
+    SettingsFullScreenSheet(onDismiss = onDismiss) {
+            Column(modifier = Modifier.settingsSheetSurface()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -132,7 +120,6 @@ fun BlockedUsersSheet(
                     },
                 )
             }
-        }
     }
 }
 
