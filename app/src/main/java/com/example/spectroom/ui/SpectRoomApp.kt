@@ -39,6 +39,7 @@ import com.example.spectroom.R
 import com.example.spectroom.data.model.AdminSender
 import com.example.spectroom.data.model.DiscoverDistanceOption
 import com.example.spectroom.data.model.EnergyLevel
+import com.example.spectroom.data.model.BillingInterval
 import com.example.spectroom.data.model.PlanTier
 import com.example.spectroom.data.model.ProfileCard
 import com.example.spectroom.repository.ModerationRepository
@@ -699,6 +700,8 @@ fun SpectRoomApp(
                 onPlanChanged = viewModel::onBillingPlanChanged,
                 accountEmail = uiState.currentUser?.email.orEmpty(),
                 seedPlanTier = currentPlanTier,
+                seedBillingInterval = uiState.currentUser?.billingInterval
+                    ?: BillingInterval.MONTHLY,
                 onShareExportedPdf = viewModel::shareExportedPdf,
             )
         }

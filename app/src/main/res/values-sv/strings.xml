@@ -447,6 +447,7 @@ Du kan använda SpectRoom igen.</string>
     <string name="billing_cancel_confirm_title">Är du säker på att du vill avbryta din %1$s-plan?</string>
     <string name="billing_interval_yearly_adj">årsvis</string>
     <string name="billing_interval_monthly_adj">månadsvis</string>
+    <string name="billing_current_plan_label">Din nuvarande plan är %1$s</string>
     <string name="billing_cancel_confirm_yes">Ja</string>
     <string name="billing_cancel_confirm_no">Nej</string>
     <string name="billing_cancel_success_title">Plan avbruten</string>

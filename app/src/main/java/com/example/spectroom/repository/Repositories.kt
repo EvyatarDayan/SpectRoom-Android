@@ -1,6 +1,7 @@
 package com.example.spectroom.repository
 
 import com.example.spectroom.data.model.AdminSender
+import com.example.spectroom.data.model.BillingInterval
 import com.example.spectroom.data.model.ConversationDisplay
 import com.example.spectroom.data.model.ConversationMessagesPage
 import com.example.spectroom.data.model.MatchDisplay
@@ -30,6 +31,7 @@ import com.google.firebase.firestore.Source
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
@@ -293,8 +295,8 @@ class AuthRepository(
         return snapshot.toSpectRoomUser(uid)
     }
 
-    /** Live updates when iOS (or another client) changes `planTier` on the user document. */
-    fun observePlanTier(): Flow<PlanTier> = callbackFlow {
+    /** Live updates when iOS (or another client) changes billing plan on the user document. */
+    fun observeBillingPlan(): Flow<Pair<PlanTier, BillingInterval?>> = callbackFlow {
         val uid = currentUid
         if (uid == null) {
             close()
@@ -303,10 +305,17 @@ class AuthRepository(
         val registration = db.collection("users").document(uid)
             .addSnapshotListener { snapshot, _ ->
                 if (snapshot == null || !snapshot.exists()) return@addSnapshotListener
-                trySend(PlanTier.fromRaw(snapshot.getString("planTier")))
+                val tier = PlanTier.fromRaw(snapshot.getString("planTier"))
+                val intervalRaw = snapshot.getString("billingInterval")
+                val interval = intervalRaw
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { BillingInterval.fromRaw(it) }
+                trySend(tier to interval)
             }
         awaitClose { registration.remove() }
     }
+
+    fun observePlanTier(): Flow<PlanTier> = observeBillingPlan().map { it.first }
 
     suspend fun saveUserProfile(user: SpectRoomUser): Result<SpectRoomUser> {
         val uid = currentUid ?: return Result.failure(IllegalStateException("Not signed in"))
@@ -352,12 +361,18 @@ class AuthRepository(
         }
     }
 
-    suspend fun updatePlanTier(tier: PlanTier) {
+    suspend fun updateBillingPlan(tier: PlanTier, interval: BillingInterval?) {
         val uid = currentUid ?: return
-        db.collection("users").document(uid).set(
-            mapOf("planTier" to tier.rawValue),
-            SetOptions.merge(),
-        ).await()
+        val data = linkedMapOf<String, Any>("planTier" to tier.rawValue)
+        when {
+            tier == PlanTier.FREE -> data["billingInterval"] = ""
+            interval != null -> data["billingInterval"] = interval.rawValue
+        }
+        db.collection("users").document(uid).set(data, SetOptions.merge()).await()
+    }
+
+    suspend fun updatePlanTier(tier: PlanTier) {
+        updateBillingPlan(tier, interval = null)
     }
 
     suspend fun activateProfileBoost(activeUntilMillis: Long, lastBoostAtMillis: Long = System.currentTimeMillis()) {
@@ -563,6 +578,9 @@ fun DocumentSnapshot.toSpectRoomUser(uid: String): SpectRoomUser {
         shareSensoryPreferences = getBoolean("shareSensoryPreferences") ?: false,
         energyLevel = (get("energyLevel") as? Number)?.toInt() ?: 4,
         planTier = PlanTier.fromRaw(getString("planTier")),
+        billingInterval = getString("billingInterval")
+            ?.takeIf { it.isNotBlank() }
+            ?.let { BillingInterval.fromRaw(it) },
         lastProfileBoostAtMillis = (get("lastProfileBoostAt") as? Number)?.toDouble()?.let { (it * 1000).toLong() }
             ?: (get("lastProfileBoostAt") as? Number)?.toLong(),
         boostedUntilMillis = (get("boostedUntil") as? Number)?.toDouble()?.let { seconds ->

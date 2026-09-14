@@ -2,6 +2,7 @@ package com.example.spectroom.data.local
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.example.spectroom.data.model.BillingInterval
 import com.example.spectroom.data.model.PlanTier
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -9,8 +10,8 @@ import java.util.Locale
 import java.util.TimeZone
 
 /**
- * Persists the active billing plan tier used for Discover / media / boost gates.
- * Mirrors iOS `DiscoverDailyLimit.planTierDefaultsKey` + sync.
+ * Local cache of Firestore `planTier` + `billingInterval`.
+ * Firestore is the source of truth; this store mirrors it for offline gates.
  */
 class PlanEntitlementsStore(context: Context) {
     private val prefs: SharedPreferences =
@@ -23,12 +24,30 @@ class PlanEntitlementsStore(context: Context) {
             prefs.edit().putString(KEY_PLAN_TIER, value.rawValue).commit()
         }
 
+    var currentBillingInterval: BillingInterval
+        get() = BillingInterval.fromRaw(
+            prefs.getString(KEY_BILLING_INTERVAL, BillingInterval.MONTHLY.rawValue),
+        )
+        set(value) {
+            prefs.edit().putString(KEY_BILLING_INTERVAL, value.rawValue).commit()
+        }
+
     fun syncPlanTier(tier: PlanTier) {
+        syncBillingPlan(tier, interval = null)
+    }
+
+    fun syncBillingPlan(tier: PlanTier, interval: BillingInterval?) {
         currentPlanTier = tier
+        currentBillingInterval = when {
+            tier == PlanTier.FREE -> BillingInterval.MONTHLY
+            interval != null -> interval
+            else -> currentBillingInterval
+        }
     }
 
     companion object {
         const val KEY_PLAN_TIER = "billingCurrentPlanTier"
+        const val KEY_BILLING_INTERVAL = "billingCurrentInterval"
         private const val PREFS_NAME = "spectroom_billing"
     }
 }

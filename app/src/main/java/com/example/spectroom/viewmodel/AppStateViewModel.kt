@@ -22,6 +22,7 @@ import com.example.spectroom.data.model.AdminUserProfile
 import com.example.spectroom.data.model.AppLanguage
 import com.example.spectroom.data.model.ModerationFreezeDuration
 import com.example.spectroom.data.model.ModerationNotice
+import com.example.spectroom.data.model.BillingInterval
 import com.example.spectroom.data.model.PlanTier
 import com.example.spectroom.data.model.SupportTopic
 import com.example.spectroom.data.model.UserReport
@@ -622,7 +623,10 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 val resolved = applyPlanEntitlementsFromUser(profile)
                 _uiState.update { it.copy(currentUser = resolved) }
             } ?: run {
-                MockBillingService.shared.alignWithPlanTier(planEntitlementsStore.currentPlanTier)
+                MockBillingService.shared.alignWithPlanTier(
+                    planEntitlementsStore.currentPlanTier,
+                    planEntitlementsStore.currentBillingInterval,
+                )
             }
             _showAccountBilling.value = true
         }
@@ -794,14 +798,19 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         _showUndoLimitOverlay.value = false
     }
 
-    fun onBillingPlanChanged(tier: PlanTier) {
+    fun onBillingPlanChanged(tier: PlanTier, interval: BillingInterval = BillingInterval.MONTHLY) {
         markLocalPlanWrite()
-        resolvePlanTier(tier)
+        resolvePlanTier(tier, interval)
         viewModelScope.launch {
-            pushPlanTierToFirestore(tier)
+            pushBillingPlanToFirestore(tier, interval)
             _uiState.update { state ->
                 val user = state.currentUser ?: return@update state
-                state.copy(currentUser = user.copy(planTier = tier))
+                state.copy(
+                    currentUser = user.copy(
+                        planTier = tier,
+                        billingInterval = interval.takeUnless { tier == PlanTier.FREE },
+                    ),
+                )
             }
             refreshDiscoverStateAfterBillingChange()
             ensureAutomaticProfileBoost()
@@ -1964,12 +1973,20 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
-     * Apply [tier] to local entitlements + mock billing (persisted).
-     * Matches iOS `DiscoverDailyLimit.syncPlanTier`.
+     * Apply [tier] (+ optional [interval]) to local cache + mock billing.
+     * Callers must pass the Firestore values when syncing from the cloud.
      */
-    private fun resolvePlanTier(tier: PlanTier): PlanTier {
-        planEntitlementsStore.syncPlanTier(tier)
-        MockBillingService.shared.alignWithPlanTier(tier)
+    private fun resolvePlanTier(
+        tier: PlanTier,
+        interval: BillingInterval? = null,
+    ): PlanTier {
+        val resolvedInterval = when {
+            tier == PlanTier.FREE -> BillingInterval.MONTHLY
+            interval != null -> interval
+            else -> planEntitlementsStore.currentBillingInterval
+        }
+        planEntitlementsStore.syncBillingPlan(tier, resolvedInterval)
+        MockBillingService.shared.alignWithPlanTier(tier, resolvedInterval)
         _currentPlanTier.value = tier
         return tier
     }
@@ -1981,39 +1998,70 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
     private fun isWithinLocalPlanWriteGrace(): Boolean =
         System.currentTimeMillis() - localPlanWriteAtMillis < LOCAL_PLAN_WRITE_GRACE_MS
 
-    private suspend fun pushPlanTierToFirestore(tier: PlanTier) {
+    private suspend fun pushBillingPlanToFirestore(
+        tier: PlanTier,
+        interval: BillingInterval?,
+    ) {
         repeat(3) { attempt ->
-            val ok = runCatching { authRepository.updatePlanTier(tier) }.isSuccess
+            val ok = runCatching {
+                authRepository.updateBillingPlan(tier, interval)
+            }.isSuccess
             if (ok) return
             delay(400L * (attempt + 1))
         }
     }
 
+    private suspend fun pushPlanTierToFirestore(tier: PlanTier) {
+        pushBillingPlanToFirestore(
+            tier = tier,
+            interval = planEntitlementsStore.currentBillingInterval
+                .takeUnless { tier == PlanTier.FREE },
+        )
+    }
+
     /**
-     * Resolve entitlements like iOS: local mock billing wins on this device, and is
-     * re-pushed to Firestore so the plan badge stays correct. Adopt a paid cloud plan
-     * only when this device is still Free (first login / cross-device upgrade).
-     * Remote downgrades from iOS still arrive via [observePlanTier].
+     * Firestore is the source of truth for plan tier + billing interval.
+     * Local mock billing / prefs are only a cache (except a short grace window after
+     * a write from this device, to avoid a stale listener snapshot undoing it).
      */
     private fun applyPlanEntitlementsFromUser(profile: SpectRoomUser): SpectRoomUser {
-        val local = planEntitlementsStore.currentPlanTier
-        val remote = profile.planTier
-        val resolved = when {
-            isWithinLocalPlanWriteGrace() -> local
-            local == PlanTier.FREE && remote != PlanTier.FREE -> remote
-            else -> local
+        if (isWithinLocalPlanWriteGrace()) {
+            val localTier = planEntitlementsStore.currentPlanTier
+            val localInterval = planEntitlementsStore.currentBillingInterval
+            resolvePlanTier(localTier, localInterval)
+            return profile.copy(
+                planTier = localTier,
+                billingInterval = localInterval.takeUnless { localTier == PlanTier.FREE },
+            )
         }
-        resolvePlanTier(resolved)
-        if (resolved != remote || isWithinLocalPlanWriteGrace()) {
-            viewModelScope.launch { pushPlanTierToFirestore(resolved) }
+
+        val remoteTier = profile.planTier
+        val remoteInterval = when {
+            remoteTier == PlanTier.FREE -> BillingInterval.MONTHLY
+            profile.billingInterval != null -> profile.billingInterval
+            // Paid plan in DB without interval yet — converge on monthly and backfill.
+            else -> BillingInterval.MONTHLY
         }
+        resolvePlanTier(remoteTier, remoteInterval)
+
+        val needsIntervalBackfill =
+            remoteTier != PlanTier.FREE && profile.billingInterval == null
+        if (needsIntervalBackfill) {
+            viewModelScope.launch {
+                pushBillingPlanToFirestore(remoteTier, remoteInterval)
+            }
+        }
+
         profileBoostLimitStore.syncFromRemote(
             accountKey = authRepository.accountKey,
             lastBoostAtMillis = profile.lastProfileBoostAtMillis,
             boostedUntilMillis = profile.boostedUntilMillis,
         )
         ensureAutomaticProfileBoost()
-        return profile.copy(planTier = resolved)
+        return profile.copy(
+            planTier = remoteTier,
+            billingInterval = remoteInterval.takeUnless { remoteTier == PlanTier.FREE },
+        )
     }
 
     fun messagingUserId(): String? =
@@ -3308,14 +3356,33 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             }
         }
         val planTierJob = viewModelScope.launch {
-            authRepository.observePlanTier().collect { remoteTier ->
-                if (remoteTier == _currentPlanTier.value) return@collect
-                // Don't let a stale Free snapshot undo a plan change just made on Android.
+            authRepository.observeBillingPlan().collect { (remoteTier, remoteInterval) ->
+                // Don't let a stale snapshot undo a plan change just made on Android.
                 if (isWithinLocalPlanWriteGrace()) return@collect
-                resolvePlanTier(remoteTier)
+                val localTier = _currentPlanTier.value
+                val localInterval = MockBillingService.shared.currentSubscription.interval
+                val tierChanged = remoteTier != localTier
+                val intervalChanged =
+                    remoteInterval != null &&
+                        remoteTier != PlanTier.FREE &&
+                        remoteInterval != localInterval
+                if (!tierChanged && !intervalChanged) return@collect
+                val intervalToApply = when {
+                    remoteTier == PlanTier.FREE -> BillingInterval.MONTHLY
+                    remoteInterval != null -> remoteInterval
+                    else -> localInterval
+                }
+                resolvePlanTier(remoteTier, intervalToApply)
                 _uiState.update { state ->
                     val user = state.currentUser ?: return@update state
-                    state.copy(currentUser = user.copy(planTier = remoteTier))
+                    state.copy(
+                        currentUser = user.copy(
+                            planTier = remoteTier,
+                            billingInterval = intervalToApply.takeUnless {
+                                remoteTier == PlanTier.FREE
+                            },
+                        ),
+                    )
                 }
                 refreshDiscoverStateAfterBillingChange()
                 ensureAutomaticProfileBoost()

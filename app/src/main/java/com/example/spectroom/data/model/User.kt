@@ -37,6 +37,8 @@ data class SpectRoomUser(
     /** 0 Low Battery, 2 Moderate Social, 4 Fully Social Mode */
     val energyLevel: Int = 4,
     val planTier: PlanTier = PlanTier.FREE,
+    /** Billing cycle synced via Firestore (`monthly` / `yearly`). Null when unset / Free. */
+    val billingInterval: BillingInterval? = null,
     val lastProfileBoostAtMillis: Long? = null,
     val boostedUntilMillis: Long? = null,
 )

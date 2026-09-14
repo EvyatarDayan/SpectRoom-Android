@@ -44,6 +44,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
@@ -71,6 +72,7 @@ import java.util.Date
 import java.util.Locale
 private data class PendingPlanChange(
     val plan: SubscriptionPlan,
+    val interval: BillingInterval,
     val title: String,
     val message: String,
 )
@@ -116,14 +118,16 @@ private class AccountBillingState(
      */
     suspend fun performPlanChange(
         plan: SubscriptionPlan,
+        interval: BillingInterval,
         successLabel: String,
         errorMessage: (Throwable) -> String,
-        onPlanChanged: (PlanTier) -> Unit = {},
+        onPlanChanged: (PlanTier, BillingInterval) -> Unit = { _, _ -> },
     ) {
         isBusy = true
         try {
-            subscription = service.changePlan(plan.id, selectedInterval)
-            onPlanChanged(plan.tier)
+            subscription = service.changePlan(plan.id, interval)
+            selectedInterval = subscription?.interval ?: interval
+            onPlanChanged(plan.tier, selectedInterval)
             planChangeSuccessLabel = successLabel
         } catch (e: Exception) {
             showToast(errorMessage(e))
@@ -164,10 +168,13 @@ private class AccountBillingState(
         return current.interval == selectedInterval
     }
 
-    /** Cancelled paid plan that can be renewed for the selected interval. */
+    /** Cancelled paid plan that can be renewed for its own billing interval. */
     fun canRenewCancelledPlan(plan: SubscriptionPlan): Boolean {
         if (!isCurrent(plan) || plan.tier == PlanTier.FREE) return false
-        return subscription?.status == SubscriptionStatus.CANCELLED
+        val current = subscription ?: return false
+        if (current.status != SubscriptionStatus.CANCELLED) return false
+        // Renew keeps the cancelled plan's interval; switching tabs is "Change to…".
+        return current.interval == selectedInterval
     }
 
     /**
@@ -196,9 +203,10 @@ private class AccountBillingState(
 @Composable
 fun AccountBillingSheet(
     onDismiss: () -> Unit,
-    onPlanChanged: (PlanTier) -> Unit = {},
+    onPlanChanged: (PlanTier, BillingInterval) -> Unit = { _, _ -> },
     accountEmail: String = "",
     seedPlanTier: PlanTier = PlanTier.FREE,
+    seedBillingInterval: BillingInterval = BillingInterval.MONTHLY,
     onShareExportedPdf: (android.net.Uri) -> Unit = {},
 ) {
     val colors = LocalSpectRoomColors.current
@@ -218,8 +226,8 @@ fun AccountBillingSheet(
         MockBillingService.shared.setOnPlanChangedListener(onPlanChanged)
     }
 
-    LaunchedEffect(seedPlanTier) {
-        MockBillingService.shared.alignWithPlanTier(seedPlanTier)
+    LaunchedEffect(seedPlanTier, seedBillingInterval) {
+        MockBillingService.shared.alignWithPlanTier(seedPlanTier, seedBillingInterval)
         state.load()
     }
 
@@ -257,6 +265,7 @@ fun AccountBillingSheet(
                                     state.planChangeSuccessLabel = null
                                     state.pendingPlanChange = PendingPlanChange(
                                         plan = plan,
+                                        interval = state.selectedInterval,
                                         title = planChangeAlertTitleText(context, state, plan),
                                         message = planChangeAlertMessageText(context, state, plan),
                                     )
@@ -349,15 +358,19 @@ fun AccountBillingSheet(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        val plan = pending.plan
                         if (state.isBusy) return@TextButton
                         // Dismiss confirm immediately, then run change + success alert (iOS).
-                        val successLabel = planChangeTargetLabelText(context, state, plan)
+                        val successLabel = planChangeTargetLabelForInterval(
+                            context,
+                            pending.plan,
+                            pending.interval,
+                        )
                         state.isBusy = true
                         state.pendingPlanChange = null
                         scope.launch {
                             state.performPlanChange(
-                                plan = plan,
+                                plan = pending.plan,
+                                interval = pending.interval,
                                 successLabel = successLabel,
                                 errorMessage = ::errorMessage,
                                 onPlanChanged = onPlanChanged,
@@ -409,10 +422,17 @@ private fun planActionTitle(state: AccountBillingState, plan: SubscriptionPlan):
         )
     if (state.isCurrent(plan)) {
         if (plan.tier != PlanTier.FREE && current.status == SubscriptionStatus.CANCELLED) {
-            return stringResource(
-                R.string.billing_action_renew_interval,
-                stringResource(state.selectedInterval.adjectiveRes),
-            )
+            return if (current.interval == state.selectedInterval) {
+                stringResource(
+                    R.string.billing_action_renew_interval,
+                    stringResource(current.interval.adjectiveRes),
+                )
+            } else {
+                stringResource(
+                    R.string.billing_action_change_to,
+                    planChangeTargetLabel(state, plan),
+                )
+            }
         }
         if (state.canCancelCurrentPlan(plan)) {
             return stringResource(R.string.billing_action_cancel_plan)
@@ -439,10 +459,16 @@ private fun planChangeTargetLabelText(
     context: android.content.Context,
     state: AccountBillingState,
     plan: SubscriptionPlan,
+): String = planChangeTargetLabelForInterval(context, plan, state.selectedInterval)
+
+private fun planChangeTargetLabelForInterval(
+    context: android.content.Context,
+    plan: SubscriptionPlan,
+    interval: BillingInterval,
 ): String {
     val planName = context.getString(plan.tier.displayNameRes)
     if (plan.tier == PlanTier.FREE) return planName
-    val adjective = context.getString(state.selectedInterval.adjectiveRes)
+    val adjective = context.getString(interval.adjectiveRes)
     return "$adjective $planName"
 }
 
@@ -454,6 +480,7 @@ private fun currentPlanLabelText(
         ?: return context.getString(R.string.billing_plan_free)
     val planName = context.getString(current.tier.displayNameRes)
     if (current.tier == PlanTier.FREE) return planName
+    // Always use the live subscription interval — never the browse toggle.
     val adjective = context.getString(current.interval.adjectiveRes)
     return "$adjective $planName"
 }
@@ -538,7 +565,7 @@ private fun BillingContent(
     Column(modifier = Modifier.fillMaxSize()) {
         // Pinned above the scroll, matching iOS billingContent.
         BillingIntervalSection(
-            selectedInterval = state.selectedInterval,
+            state = state,
             onIntervalChange = onIntervalChange,
             modifier = Modifier
                 .fillMaxWidth()
@@ -586,11 +613,17 @@ private fun BillingCard(
 
 @Composable
 private fun BillingIntervalSection(
-    selectedInterval: BillingInterval,
+    state: AccountBillingState,
     onIntervalChange: (BillingInterval) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalSpectRoomColors.current
+    val context = LocalContext.current
+    val selectedInterval = state.selectedInterval
+    val currentPlanLabel = stringResource(
+        R.string.billing_current_plan_label,
+        currentPlanLabelText(context, state),
+    )
     BillingCard(modifier = modifier) {
         Row(
             modifier = Modifier
@@ -644,6 +677,22 @@ private fun BillingIntervalSection(
                 }
             }
         }
+        var planLabelSize by remember(currentPlanLabel) { mutableStateOf(14.sp) }
+        Text(
+            text = currentPlanLabel,
+            color = colors.secondaryText,
+            fontSize = planLabelSize,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Clip,
+            onTextLayout = { result ->
+                if (result.hasVisualOverflow && planLabelSize > 10.sp) {
+                    planLabelSize = (planLabelSize.value * 0.9f).coerceAtLeast(10f).sp
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

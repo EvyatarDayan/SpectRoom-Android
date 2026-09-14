@@ -447,6 +447,7 @@ Fullur aðgangur verður sjálfkrafa endurheimtur á %2$s.</string>
     <string name="billing_cancel_confirm_title">Ertu viss um að þú viljir hætta við %1$s áætlunina þína?</string>
     <string name="billing_interval_yearly_adj">árlega</string>
     <string name="billing_interval_monthly_adj">mánaðarlega</string>
+    <string name="billing_current_plan_label">Núverandi áætlun þín er %1$s</string>
     <string name="billing_cancel_confirm_yes">Já</string>
     <string name="billing_cancel_confirm_no">Nei</string>
     <string name="billing_cancel_success_title">Áætlun hætt</string>

@@ -11,15 +11,28 @@ enum class BillingInterval(
     @param:StringRes val titleRes: Int,
     /** Lowercase adjective used in CTAs (“Change to yearly Pro”). */
     @param:StringRes val adjectiveRes: Int,
+    /** Firestore / cross-platform raw value (`monthly` / `yearly`). */
+    val rawValue: String,
 ) {
     MONTHLY(
         titleRes = R.string.billing_interval_monthly,
         adjectiveRes = R.string.billing_interval_monthly_adj,
+        rawValue = "monthly",
     ),
     YEARLY(
         titleRes = R.string.billing_interval_yearly,
         adjectiveRes = R.string.billing_interval_yearly_adj,
-    ),
+        rawValue = "yearly",
+    );
+
+    companion object {
+        fun fromRaw(raw: String?): BillingInterval {
+            if (raw.isNullOrBlank()) return MONTHLY
+            return entries.firstOrNull { it.rawValue.equals(raw, ignoreCase = true) }
+                ?: entries.firstOrNull { it.name.equals(raw, ignoreCase = true) }
+                ?: MONTHLY
+        }
+    }
 }
 
 enum class PlanTier(

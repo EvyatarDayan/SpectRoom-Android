@@ -131,7 +131,7 @@ class MockBillingService private constructor(
     private val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val planEntitlementsStore = PlanEntitlementsStore(appContext)
     private var snapshot: BillingSnapshot = makeInitialSnapshot()
-    private var onPlanChanged: ((PlanTier) -> Unit)? = null
+    private var onPlanChanged: ((PlanTier, BillingInterval) -> Unit)? = null
 
     init {
         // Never downgrade a higher local entitlement with a Free mock snapshot (iOS: local billing wins).
@@ -146,33 +146,49 @@ class MockBillingService private constructor(
         planEntitlementsStore.syncPlanTier(resolved)
     }
 
-    fun setOnPlanChangedListener(listener: ((PlanTier) -> Unit)?) {
+    fun setOnPlanChangedListener(listener: ((PlanTier, BillingInterval) -> Unit)?) {
         onPlanChanged = listener
     }
 
+    val currentSubscription: CurrentSubscription
+        get() = snapshot.subscription
+
     /**
      * Align mock subscription + local entitlements to [tier] (persisted).
-     * Used after plan changes and when resolving the active plan on login.
+     * When [interval] is provided (e.g. from Firestore), it becomes the billing cycle.
      */
-    fun alignWithPlanTier(tier: PlanTier) {
-        if (snapshot.subscription.tier == tier) {
-            planEntitlementsStore.syncPlanTier(tier)
+    fun alignWithPlanTier(tier: PlanTier, interval: BillingInterval? = null) {
+        val resolvedInterval = when {
+            tier == PlanTier.FREE -> BillingInterval.MONTHLY
+            interval != null -> interval
+            else -> snapshot.subscription.interval
+        }
+        if (
+            snapshot.subscription.tier == tier &&
+            snapshot.subscription.interval == resolvedInterval
+        ) {
+            planEntitlementsStore.syncBillingPlan(tier, resolvedInterval)
             return
         }
         val aligned = subscriptionForTier(
             tier = tier,
-            interval = snapshot.subscription.interval,
-            preferExistingRenewal = snapshot.subscription.takeIf { it.tier == tier },
+            interval = resolvedInterval,
+            preferExistingRenewal = snapshot.subscription.takeIf {
+                it.tier == tier && it.interval == resolvedInterval
+            },
         )
         snapshot = snapshot.copy(subscription = aligned)
         persistSubscription(aligned)
-        planEntitlementsStore.syncPlanTier(tier)
+        planEntitlementsStore.syncBillingPlan(tier, resolvedInterval)
     }
 
     override suspend fun fetchBillingSnapshot(): BillingSnapshot {
         delay(DELAY_MS)
         // Entitlements are updated from Firestore (including iOS plan changes). Mirror them here.
-        alignWithPlanTier(planEntitlementsStore.currentPlanTier)
+        alignWithPlanTier(
+            planEntitlementsStore.currentPlanTier,
+            planEntitlementsStore.currentBillingInterval,
+        )
         return snapshot
     }
 
@@ -181,9 +197,15 @@ class MockBillingService private constructor(
         val plan = snapshot.availablePlans.firstOrNull { it.id == planId }
             ?: throw BillingServiceException.PlanNotFound
         val previous = snapshot.subscription
+        val resolvedInterval = if (plan.tier == PlanTier.FREE) {
+            // Free has no billing cycle — don't persist the Monthly/Yearly browse toggle.
+            BillingInterval.MONTHLY
+        } else {
+            interval
+        }
         val calendar = Calendar.getInstance()
         calendar.add(
-            if (interval == BillingInterval.YEARLY) Calendar.YEAR else Calendar.MONTH,
+            if (resolvedInterval == BillingInterval.YEARLY) Calendar.YEAR else Calendar.MONTH,
             1,
         )
         val subscription = CurrentSubscription(
@@ -194,13 +216,13 @@ class MockBillingService private constructor(
             } else {
                 SubscriptionStatus.RENEWING
             },
-            interval = interval,
+            interval = resolvedInterval,
             renewsOnMillis = if (plan.tier == PlanTier.FREE) null else calendar.timeInMillis,
             cancelledAtMillis = null,
         )
         snapshot = snapshot.copy(subscription = subscription)
         persistSubscription(subscription)
-        planEntitlementsStore.syncPlanTier(plan.tier)
+        planEntitlementsStore.syncBillingPlan(plan.tier, subscription.interval)
 
         val next = snapshot.subscription
         val changed =
@@ -212,7 +234,7 @@ class MockBillingService private constructor(
         if (changed) {
             PlanChangeEmailNotifier.notifyChangedAsync(previous, next)
         }
-        onPlanChanged?.invoke(plan.tier)
+        onPlanChanged?.invoke(plan.tier, next.interval)
         return next
     }
 
@@ -363,7 +385,9 @@ class MockBillingService private constructor(
         }.getOrElse { return null }
         val interval = runCatching {
             BillingInterval.valueOf(prefs.getString(KEY_INTERVAL, null).orEmpty())
-        }.getOrElse { BillingInterval.MONTHLY }
+        }.getOrElse { BillingInterval.MONTHLY }.let { stored ->
+            if (tier == PlanTier.FREE) BillingInterval.MONTHLY else stored
+        }
         val renewsOn = prefs.getLong(KEY_RENEWS_ON, -1L).takeIf { it > 0L }
         val cancelledAt = prefs.getLong(KEY_CANCELLED_AT, -1L).takeIf { it > 0L }
         return CurrentSubscription(

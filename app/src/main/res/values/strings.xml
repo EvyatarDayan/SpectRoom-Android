@@ -632,6 +632,7 @@ You can use SpectRoom again.</string>
     <string name="billing_filter_all">All</string>
     <string name="billing_interval_monthly">Monthly</string>
     <string name="billing_interval_monthly_adj">monthly</string>
+    <string name="billing_current_plan_label">Your current plan is %1$s</string>
     <string name="billing_interval_yearly">Yearly</string>
     <string name="billing_interval_yearly_adj">yearly</string>
     <string name="billing_invoice_status_paid">Paid</string>

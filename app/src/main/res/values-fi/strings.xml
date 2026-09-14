@@ -447,6 +447,7 @@ Voit käyttää SpectRoomia uudelleen.</string>
     <string name="billing_cancel_confirm_title">Haluatko varmasti peruuttaa %1$s-tilauksesi?</string>
     <string name="billing_interval_yearly_adj">vuosittainen</string>
     <string name="billing_interval_monthly_adj">kuukausittainen</string>
+    <string name="billing_current_plan_label">Nykyinen pakettisi on %1$s</string>
     <string name="billing_cancel_confirm_yes">Kyllä</string>
     <string name="billing_cancel_confirm_no">Ei</string>
     <string name="billing_cancel_success_title">Tilaus peruutettu</string>
