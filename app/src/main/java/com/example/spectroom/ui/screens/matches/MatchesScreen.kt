@@ -43,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
@@ -548,8 +549,11 @@ private fun MatchGridCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center,
             ) {
+                // iOS: hidden trailing emoji balances the leading one so the
+                // two-line title ("Low Battery" / "today") stays optically centered.
+                val energyEmoji = EnergyLevel.emoji(profile.energyLevel)
                 Text(
-                    text = EnergyLevel.emoji(profile.energyLevel),
+                    text = energyEmoji,
                     fontSize = 18.sp,
                     modifier = Modifier.offset(x = 12.dp),
                 )
@@ -562,8 +566,14 @@ private fun MatchGridCard(
                     fontSize = 16.sp,
                     color = energyColor,
                     textAlign = TextAlign.Center,
+                    lineHeight = 20.sp,
                     maxLines = 2,
-                    modifier = Modifier.padding(start = 6.dp, end = 18.dp),
+                    modifier = Modifier.padding(start = 18.dp, end = 6.dp),
+                )
+                Text(
+                    text = energyEmoji,
+                    fontSize = 18.sp,
+                    modifier = Modifier.alpha(0f),
                 )
             }
         }

@@ -10,11 +10,19 @@ import java.util.TimeZone
 
 /**
  * Per-account discover like/pass quota (local calendar day).
- * Mirrors iOS `DiscoverDailyLimit` (10 swipes/day, undo, second thoughts).
+ * Mirrors iOS `DiscoverDailyLimit` — swipe/undo limits driven by [PlanEntitlementsStore].
  */
-class DiscoverDailyLimitStore(context: Context) {
+class DiscoverDailyLimitStore(
+    context: Context,
+    private val planStore: PlanEntitlementsStore,
+) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    fun maxSwipesPerDay(): Int = planStore.currentPlanTier.dailyDiscoverSwipeLimit
+
+    /** `null` means unlimited undos (Premium). */
+    fun maxUndosPerDay(): Int? = planStore.currentPlanTier.dailyDiscoverUndoLimit
 
     fun currentCount(accountKey: String?): Int {
         if (accountKey.isNullOrBlank()) return 0
@@ -43,7 +51,28 @@ class DiscoverDailyLimitStore(context: Context) {
     }
 
     fun hasReachedLimit(accountKey: String?): Boolean =
-        currentCount(accountKey) >= MAX_SWIPES_PER_DAY
+        currentCount(accountKey) >= maxSwipesPerDay()
+
+    fun currentUndoCount(accountKey: String?): Int {
+        if (accountKey.isNullOrBlank()) return 0
+        ensureToday(accountKey)
+        return prefs.getInt(undoCountKey(accountKey), 0)
+    }
+
+    fun hasReachedUndoLimit(accountKey: String?): Boolean {
+        val max = maxUndosPerDay() ?: return false
+        return currentUndoCount(accountKey) >= max
+    }
+
+    fun recordUndo(accountKey: String?): Int {
+        if (accountKey.isNullOrBlank()) return 0
+        val count = currentUndoCount(accountKey) + 1
+        prefs.edit()
+            .putString(undoDateKey(accountKey), todayKey())
+            .putInt(undoCountKey(accountKey), count)
+            .apply()
+        return count
+    }
 
     fun hasUsedSecondThoughtsToday(accountKey: String?): Boolean {
         if (accountKey.isNullOrBlank()) return true
@@ -59,7 +88,7 @@ class DiscoverDailyLimitStore(context: Context) {
             .apply()
     }
 
-    /** Clears today's swipe quota (mirrors iOS `DiscoverDailyLimit.reset()`). */
+    /** Clears today's swipe/undo quota (mirrors iOS `DiscoverDailyLimit.reset()`). */
     fun reset(accountKey: String?) {
         if (accountKey.isNullOrBlank()) return
         val today = todayKey()
@@ -68,6 +97,8 @@ class DiscoverDailyLimitStore(context: Context) {
             .putInt(countKey(accountKey), 0)
             .putString(secondThoughtsDateKey(accountKey), today)
             .putBoolean(secondThoughtsKey(accountKey), false)
+            .putString(undoDateKey(accountKey), today)
+            .putInt(undoCountKey(accountKey), 0)
             .apply()
     }
 
@@ -79,6 +110,8 @@ class DiscoverDailyLimitStore(context: Context) {
                 .putInt(countKey(accountKey), 0)
                 .putString(secondThoughtsDateKey(accountKey), today)
                 .putBoolean(secondThoughtsKey(accountKey), false)
+                .putString(undoDateKey(accountKey), today)
+                .putInt(undoCountKey(accountKey), 0)
                 .apply()
         }
     }
@@ -95,9 +128,10 @@ class DiscoverDailyLimitStore(context: Context) {
     private fun countKey(accountKey: String) = "discoverDailySwipeCount_$accountKey"
     private fun secondThoughtsKey(accountKey: String) = "discoverSecondThoughtsUsed_$accountKey"
     private fun secondThoughtsDateKey(accountKey: String) = "discoverSecondThoughtsDate_$accountKey"
+    private fun undoDateKey(accountKey: String) = "discoverDailyUndoDate_$accountKey"
+    private fun undoCountKey(accountKey: String) = "discoverDailyUndoCount_$accountKey"
 
     companion object {
-        const val MAX_SWIPES_PER_DAY = 10
         private const val PREFS_NAME = "spectroom_discover"
     }
 }

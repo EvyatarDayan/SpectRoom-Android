@@ -1,67 +1,73 @@
 package com.example.spectroom.data.model
 
+import android.content.Context
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import com.example.spectroom.R
 
-enum class SensoryPreferenceOption(val rawValue: String, val title: String, val subtitle: String) {
+enum class SensoryPreferenceOption(
+    val rawValue: String,
+    @StringRes val titleRes: Int,
+    @StringRes val subtitleRes: Int,
+) {
     LOW_NOISE(
         "lowNoiseEnvironments",
-        "Low-noise environments",
-        "Quieter places help me stay present",
+        R.string.profile_sensory_low_noise_title,
+        R.string.profile_sensory_low_noise_subtitle,
     ),
     DIM_LIGHTING(
         "dimSoftLighting",
-        "Dim / soft lighting",
-        "Harsh lighting can be overwhelming",
+        R.string.profile_sensory_dim_lighting_title,
+        R.string.profile_sensory_dim_lighting_subtitle,
     ),
     ACTIVE_WALKING(
         "activeWalkingDates",
-        "Active walking dates",
-        "Moving together feels easier than sitting still",
+        R.string.profile_sensory_active_walking_title,
+        R.string.profile_sensory_active_walking_subtitle,
     ),
     SHORT_MEETUPS(
         "shortLowPressureMeetups",
-        "Short, low-pressure meetups",
-        "Brief plans with an easy exit",
+        R.string.profile_sensory_short_meetups_title,
+        R.string.profile_sensory_short_meetups_subtitle,
     ),
     FIDGET_STIM(
         "fidgetStimFriendlySpaces",
-        "Fidget / stim-friendly spaces",
-        "Places where stimming is welcome",
+        R.string.profile_sensory_fidget_stim_title,
+        R.string.profile_sensory_fidget_stim_subtitle,
     ),
     SAFE_FOODS(
         "predictableSafeFoods",
-        "Predictable / safe foods",
-        "Familiar menus reduce stress",
+        R.string.profile_sensory_safe_foods_title,
+        R.string.profile_sensory_safe_foods_subtitle,
     ),
     SCENT_FREE(
         "scentFreeEnvironments",
-        "Scent-free environments",
-        "Strong fragrances can be a barrier",
+        R.string.profile_sensory_scent_free_title,
+        R.string.profile_sensory_scent_free_subtitle,
     ),
     TEMPERATURE(
         "comfortableTemperatureZones",
-        "Comfortable temperature zones",
-        "Not too hot, not too cold",
+        R.string.profile_sensory_temperature_title,
+        R.string.profile_sensory_temperature_subtitle,
     ),
     VISUALLY_CALM(
         "visuallyCalmSpaces",
-        "Visually calm spaces",
-        "Less visual clutter feels better",
+        R.string.profile_sensory_visually_calm_title,
+        R.string.profile_sensory_visually_calm_subtitle,
     ),
     CLEAR_TOUCH(
         "deepPressureClearTouch",
-        "Deep pressure / clear touch",
-        "Clear consent and firm contact preferred",
+        R.string.profile_sensory_clear_touch_title,
+        R.string.profile_sensory_clear_touch_subtitle,
     );
 
     companion object {
         fun fromRaw(value: String): SensoryPreferenceOption? =
             entries.firstOrNull { it.rawValue == value }
 
-        fun formattedTitles(rawValues: List<String>): String =
-            rawValues.mapNotNull { fromRaw(it)?.title }.joinToString(", ")
+        fun formattedTitles(rawValues: List<String>, context: Context): String =
+            rawValues.mapNotNull { fromRaw(it)?.let { option -> context.getString(option.titleRes) } }
+                .joinToString(", ")
     }
 }
 

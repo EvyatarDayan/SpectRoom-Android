@@ -36,6 +36,9 @@ data class SpectRoomUser(
     val shareSensoryPreferences: Boolean = false,
     /** 0 Low Battery, 2 Moderate Social, 4 Fully Social Mode */
     val energyLevel: Int = 4,
+    val planTier: PlanTier = PlanTier.FREE,
+    val lastProfileBoostAtMillis: Long? = null,
+    val boostedUntilMillis: Long? = null,
 )
 
 data class UserLocation(

@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.example.spectroom.R
+import com.example.spectroom.data.model.PlanTier
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
 import com.example.spectroom.ui.theme.TabSelected
 
@@ -158,11 +159,40 @@ fun ProfileTextLink(
 }
 
 @Composable
+fun ProfilePlanPhotoBadge(
+    tier: PlanTier,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalSpectRoomColors.current
+    val label = buildString {
+        append(stringResource(tier.profilePlanLabelRes))
+        if (tier.profilePlanSymbol.isNotEmpty()) {
+            append(' ')
+            append(tier.profilePlanSymbol)
+        }
+    }
+    Text(
+        text = label,
+        color = TabSelected,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Bold,
+        maxLines = 1,
+        modifier = modifier
+            .shadow(4.dp, RoundedCornerShape(50), clip = false)
+            .clip(RoundedCornerShape(50))
+            .background(colors.card.copy(alpha = 0.94f))
+            .border(0.5.dp, colors.border.copy(alpha = 0.5f), RoundedCornerShape(50))
+            .padding(horizontal = 8.dp, vertical = 5.dp),
+    )
+}
+
+@Composable
 fun ProfileMainPhotoCard(
     imageUrl: String?,
     onClick: (() -> Unit)? = null,
     showsCameraBadge: Boolean = false,
     placeholderText: String? = null,
+    planBadge: PlanTier? = null,
 ) {
     val colors = LocalSpectRoomColors.current
     Box(
@@ -201,6 +231,14 @@ fun ProfileMainPhotoCard(
                     }
                 }
             }
+        }
+        if (planBadge != null) {
+            ProfilePlanPhotoBadge(
+                tier = planBadge,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(12.dp),
+            )
         }
         if (showsCameraBadge) {
             Icon(

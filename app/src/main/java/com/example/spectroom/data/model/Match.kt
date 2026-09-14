@@ -81,6 +81,7 @@ data class ProfileCard(
     val shareSensoryPreferences: Boolean = false,
     val energyLevel: Int = 4,
     val matchPercentage: Int = 0,
+    val planTier: PlanTier = PlanTier.FREE,
 )
 
 data class MatchBreakdown(

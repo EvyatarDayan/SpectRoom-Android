@@ -35,6 +35,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -51,6 +52,7 @@ import com.example.spectroom.data.model.IdealFirstDateOption
 import com.example.spectroom.data.model.LifestyleOption
 import com.example.spectroom.data.model.LookingForOption
 import com.example.spectroom.data.model.MatchBreakdown
+import com.example.spectroom.data.model.PlanTier
 import com.example.spectroom.data.model.ProfileCard
 import com.example.spectroom.data.model.ProfileReportReason
 import com.example.spectroom.data.model.SensoryPreferenceOption
@@ -60,6 +62,7 @@ import com.example.spectroom.ui.screens.profile.ProfileEditSectionCard
 import com.example.spectroom.ui.screens.profile.ProfileFieldHeading
 import com.example.spectroom.ui.screens.profile.ProfileGalleryPhotosCard
 import com.example.spectroom.ui.screens.profile.ProfilePhotoStyle
+import com.example.spectroom.ui.screens.profile.ProfilePlanPhotoBadge
 import com.example.spectroom.ui.screens.profile.ProfileCircleIconButton
 import com.example.spectroom.ui.screens.profile.ProfilePillButton
 import com.example.spectroom.ui.theme.EnergyFullySocial
@@ -74,12 +77,14 @@ import com.example.spectroom.ui.theme.TabSelected
 fun UserProfileModal(
     profile: ProfileCard,
     matchBreakdown: MatchBreakdown?,
+    showsFullMatchBreakdown: Boolean = false,
     onDismiss: () -> Unit,
     onMessage: () -> Unit,
     onBlock: () -> Unit,
     onReport: () -> Unit,
     onOpenPhotos: (List<String>, Int) -> Unit = { _, _ -> },
     onRefresh: () -> Unit = {},
+    onUpgradePlans: () -> Unit = {},
     blockConfirmationFirstName: String? = null,
     onDismissBlockConfirmation: () -> Unit = {},
     onConfirmBlockOnly: () -> Unit = {},
@@ -161,6 +166,7 @@ fun UserProfileModal(
                 ) {
                     ProfilePhotoSection(
                         imageUrl = profile.imageURL,
+                        planBadge = profile.planTier,
                         onClick = {
                             if (allPhotos.isNotEmpty()) onOpenPhotos(allPhotos, 0)
                         },
@@ -230,7 +236,12 @@ fun UserProfileModal(
                 MatchDetailsOverlay(
                     firstName = firstName,
                     breakdown = matchBreakdown,
+                    showsFullBreakdown = showsFullMatchBreakdown,
                     onDismiss = { showingMatchDetails = false },
+                    onUpgrade = {
+                        showingMatchDetails = false
+                        onUpgradePlans()
+                    },
                 )
             }
             if (blockConfirmationFirstName != null) {
@@ -259,6 +270,7 @@ fun UserProfileModal(
 @Composable
 private fun ProfilePhotoSection(
     imageUrl: String?,
+    planBadge: PlanTier = PlanTier.FREE,
     onClick: () -> Unit,
 ) {
     val colors = LocalSpectRoomColors.current
@@ -296,6 +308,12 @@ private fun ProfilePhotoSection(
                     modifier = Modifier.size(56.dp),
                 )
             }
+            ProfilePlanPhotoBadge(
+                tier = planBadge,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(12.dp),
+            )
         }
     }
 }
@@ -503,7 +521,10 @@ private fun AboutSectionCard(profile: ProfileCard) {
             ProfileFieldHeading(stringResource(R.string.profile_sensory_preferences))
             Spacer(modifier = Modifier.height(12.dp))
             ProfileBlueFieldText(
-                text = SensoryPreferenceOption.formattedTitles(profile.sensoryPreferences),
+                text = SensoryPreferenceOption.formattedTitles(
+                    profile.sensoryPreferences,
+                    LocalContext.current,
+                ),
             )
         }
     }

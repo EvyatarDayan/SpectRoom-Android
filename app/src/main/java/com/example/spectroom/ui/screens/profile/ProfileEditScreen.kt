@@ -1,12 +1,15 @@
 package com.example.spectroom.ui.screens.profile
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,10 +25,12 @@ import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -37,11 +42,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.graphics.Color
 import com.example.spectroom.R
 import com.example.spectroom.data.model.GenderPreferenceOption
 import com.example.spectroom.data.model.BodyTypeOption
@@ -49,6 +55,7 @@ import com.example.spectroom.data.model.EnergyLevel
 import com.example.spectroom.data.model.IdealFirstDateOption
 import com.example.spectroom.data.model.LifestyleOption
 import com.example.spectroom.data.model.LookingForOption
+import com.example.spectroom.data.model.PlanTier
 import com.example.spectroom.data.model.SensoryPreferenceOption
 import com.example.spectroom.data.model.SpectRoomUser
 import com.example.spectroom.domain.ProfileCompletion
@@ -96,6 +103,8 @@ fun ProfileEditScreen(
     isSaving: Boolean = false,
     saveError: String? = null,
     showWelcomeOverlay: Boolean = false,
+    /** iOS uses AppStorage billingCurrentPlanTier for the badge — not Firestore alone. */
+    planBadge: PlanTier? = null,
     onDismissWelcome: () -> Unit = {},
     onSave: (SpectRoomUser) -> Unit = {},
     onCancel: (() -> Unit)? = null,
@@ -103,8 +112,8 @@ fun ProfileEditScreen(
     onRequestGalleryPhotoPick: () -> Unit = {},
     onDeleteGalleryPhoto: (String) -> Unit = {},
     onSearchAddress: () -> Unit = {},
-    onRequestDateOfBirthPick: (Long, (Long) -> Unit, () -> Unit) -> Unit = { _, _, _ -> },
 ) {
+    val resolvedPlanBadge = planBadge ?: user?.planTier ?: PlanTier.FREE
     val colors = LocalSpectRoomColors.current
     var name by remember(user?.firebaseDocumentId, user?.name) { mutableStateOf(user?.name.orEmpty()) }
     var dateOfBirth by remember(user?.firebaseDocumentId, user?.dateOfBirth, user?.age) {
@@ -145,14 +154,32 @@ fun ProfileEditScreen(
         )
         mutableIntStateOf(max)
     }
-    var lifestyle by remember(user?.firebaseDocumentId, user?.lifestyle) {
-        mutableStateOf(user?.lifestyle.orEmpty())
+    var lifestyle by remember(user?.firebaseDocumentId, user?.lifestyle, user?.shareLifestyle) {
+        mutableStateOf(
+            if (user?.shareLifestyle != true ||
+                user.lifestyle.isNullOrBlank() ||
+                user.lifestyle == LifestyleOption.PREFER_NOT.rawValue
+            ) {
+                LifestyleOption.PREFER_NOT.rawValue
+            } else {
+                user.lifestyle
+            },
+        )
     }
     var shareLifestyle by remember(user?.firebaseDocumentId, user?.shareLifestyle) {
         mutableStateOf(user?.shareLifestyle == true)
     }
-    var bodyType by remember(user?.firebaseDocumentId, user?.bodyType) {
-        mutableStateOf(user?.bodyType.orEmpty())
+    var bodyType by remember(user?.firebaseDocumentId, user?.bodyType, user?.shareBodyType) {
+        mutableStateOf(
+            if (user?.shareBodyType != true ||
+                user.bodyType.isNullOrBlank() ||
+                user.bodyType == BodyTypeOption.PREFER_NOT.rawValue
+            ) {
+                BodyTypeOption.PREFER_NOT.rawValue
+            } else {
+                user.bodyType
+            },
+        )
     }
     var shareBodyType by remember(user?.firebaseDocumentId, user?.shareBodyType) {
         mutableStateOf(user?.shareBodyType == true)
@@ -166,6 +193,7 @@ fun ProfileEditScreen(
     var shareIdealFirstDate by remember(user?.firebaseDocumentId, user?.shareIdealFirstDate) {
         mutableStateOf(user?.shareIdealFirstDate == true)
     }
+    var sensoryInfoOption by remember { mutableStateOf<SensoryPreferenceOption?>(null) }
 
     val completionPercent = ProfileCompletion.percentage(
         name = name,
@@ -384,6 +412,7 @@ fun ProfileEditScreen(
                     imageUrl = user?.profilePhotoURL,
                     showsCameraBadge = true,
                     placeholderText = stringResource(R.string.profile_edit_add_photo),
+                    planBadge = resolvedPlanBadge,
                     onClick = onRequestProfilePhotoPick,
                 )
                 if (isUploadingPhoto) {
@@ -451,15 +480,21 @@ fun ProfileEditScreen(
                 ageText = stringResource(R.string.profile_edit_my_age, age.toString()),
                 ageIsValid = age >= 18,
                 expanded = isDobExpanded,
-                onClick = {
-                    isDobExpanded = true
-                    onRequestDateOfBirthPick(dateOfBirth.time, { pickedMillis ->
-                        dateOfBirth = Date(pickedMillis)
-                    }, {
-                        isDobExpanded = false
-                    })
-                },
+                onClick = { isDobExpanded = !isDobExpanded },
             )
+            AnimatedVisibility(
+                visible = isDobExpanded,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically(),
+            ) {
+                Column {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    ProfileDateOfBirthWheel(
+                        date = dateOfBirth,
+                        onDateChange = { dateOfBirth = it },
+                    )
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -598,10 +633,10 @@ fun ProfileEditScreen(
         ProfileEditSectionCard {
             ProfileFieldHeading(stringResource(R.string.profile_my_sensory_preferences))
             Spacer(modifier = Modifier.height(12.dp))
-            ProfileChipList(
-                items = SensoryPreferenceOption.entries.map { it.rawValue to it.title },
+            ProfileSensoryPreferenceList(
                 selected = sensoryPreferences,
                 onToggle = { sensoryPreferences = sensoryPreferences.toggle(it) },
+                onInfo = { sensoryInfoOption = it },
             )
         }
 
@@ -649,6 +684,31 @@ fun ProfileEditScreen(
 
     if (showWelcomeOverlay) {
         CompleteProfileWelcomeOverlay(onContinue = onDismissWelcome)
+    }
+
+    val sensoryInfo = sensoryInfoOption
+    if (sensoryInfo != null) {
+        AlertDialog(
+            onDismissRequest = { sensoryInfoOption = null },
+            title = {
+                Text(
+                    text = stringResource(sensoryInfo.titleRes),
+                    fontWeight = FontWeight.Bold,
+                )
+            },
+            text = {
+                Text(text = stringResource(sensoryInfo.subtitleRes))
+            },
+            confirmButton = {
+                TextButton(onClick = { sensoryInfoOption = null }) {
+                    Text(
+                        text = stringResource(R.string.common_got_it),
+                        color = TabSelected,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            },
+        )
     }
     }
 }

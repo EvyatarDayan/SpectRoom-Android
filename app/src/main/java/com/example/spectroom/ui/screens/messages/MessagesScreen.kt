@@ -1,5 +1,6 @@
 package com.example.spectroom.ui.screens.messages
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -47,6 +48,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -55,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.example.spectroom.R
+import com.example.spectroom.data.model.AdminSender
 import com.example.spectroom.data.model.ConversationDisplay
 import com.example.spectroom.ui.components.TabBarBodyHeight
 import com.example.spectroom.ui.components.UnreadCountBadge
@@ -408,7 +411,24 @@ private fun ConversationRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Box(modifier = Modifier.size(50.dp)) {
-            if (conversation.otherUserPhotoURL.isNullOrBlank()) {
+            if (AdminSender.isAdmin(conversation.otherUserId)) {
+                Box(
+                    modifier = Modifier
+                        .size(50.dp)
+                        .clip(CircleShape)
+                        .border(1.dp, Color.Gray.copy(alpha = 0.3f), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Image(
+                        painter = painterResource(AdminSender.photoRes),
+                        contentDescription = conversation.otherUserName,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(50.dp)
+                            .clip(CircleShape),
+                    )
+                }
+            } else if (conversation.otherUserPhotoURL.isNullOrBlank()) {
                 Box(
                     modifier = Modifier
                         .size(50.dp)

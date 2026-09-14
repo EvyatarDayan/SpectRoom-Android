@@ -2,8 +2,10 @@ package com.example.spectroom.ui.screens.discover
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -24,22 +26,32 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.example.spectroom.R
 import com.example.spectroom.data.model.MatchBreakdown
+import com.example.spectroom.ui.theme.LikeGreen
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
+import com.example.spectroom.ui.theme.TabSelected
 
 @Composable
 fun MatchDetailsOverlay(
     firstName: String,
     breakdown: MatchBreakdown?,
+    showsFullBreakdown: Boolean,
     onDismiss: () -> Unit,
+    onUpgrade: () -> Unit = {},
 ) {
     val colors = LocalSpectRoomColors.current
     val percentage = breakdown?.percentage ?: 0
-    val matchColor = if (percentage > 49) Color(0xFF4CAF50) else colors.text.copy(alpha = 0.75f)
+    val matchColor = if (percentage > 49) {
+        LikeGreen
+    } else {
+        colors.text.copy(alpha = 0.75f)
+    }
+    val gotItBackground = if (colors.isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)
+    val scrimAlpha = if (colors.isDark) 0.6f else 0.35f
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.55f))
+            .background(Color.Black.copy(alpha = scrimAlpha))
             .zIndex(40f)
             .clickable(onClick = onDismiss),
         contentAlignment = Alignment.Center,
@@ -59,7 +71,7 @@ fun MatchDetailsOverlay(
                 fontSize = 22.sp,
                 color = colors.text,
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(16.dp))
             Text(
                 text = stringResource(
                     R.string.search_match_details_percent,
@@ -71,55 +83,105 @@ fun MatchDetailsOverlay(
             )
             Spacer(modifier = Modifier.height(16.dp))
 
-            DetailRow(
-                title = stringResource(R.string.search_match_details_age),
-                value = ageDetailText(firstName, breakdown?.ageDeltaFromYou ?: 0),
-            )
-            if (!breakdown?.commonLookingFor.isNullOrEmpty()) {
+            if (showsFullBreakdown) {
                 DetailRow(
-                    title = stringResource(R.string.search_match_details_looking_for),
-                    value = breakdown!!.commonLookingFor.joinToString(),
+                    title = stringResource(R.string.search_match_details_age),
+                    value = ageDetailText(firstName, breakdown?.ageDeltaFromYou ?: 0),
                 )
-            }
-            if (!breakdown?.commonInterests.isNullOrEmpty()) {
-                DetailRow(
-                    title = stringResource(R.string.search_match_details_interests),
-                    value = breakdown!!.commonInterests.joinToString(),
-                )
+                val lookingFor = breakdown?.commonLookingFor.orEmpty()
+                if (lookingFor.isNotEmpty()) {
+                    DetailRow(
+                        title = stringResource(R.string.search_match_details_looking_for),
+                        value = lookingFor.joinToString(),
+                    )
+                }
+                val interests = breakdown?.commonInterests.orEmpty()
+                if (interests.isNotEmpty()) {
+                    DetailRow(
+                        title = stringResource(R.string.search_match_details_interests),
+                        value = interests.joinToString(),
+                    )
+                }
+                val sensory = breakdown?.commonSensoryPreferences.orEmpty()
+                if (sensory.isNotEmpty()) {
+                    DetailRow(
+                        title = stringResource(R.string.search_match_details_sensory),
+                        value = sensory.joinToString(),
+                    )
+                }
+                val lifestyle = breakdown?.sharedLifestyle.orEmpty()
+                if (lifestyle.isNotBlank()) {
+                    DetailRow(
+                        title = stringResource(R.string.search_match_details_lifestyle),
+                        value = lifestyle,
+                    )
+                }
+                val idealFirstDate = breakdown?.commonIdealFirstDates.orEmpty()
+                if (idealFirstDate.isNotEmpty()) {
+                    DetailRow(
+                        title = stringResource(R.string.search_match_details_ideal_first_date),
+                        value = idealFirstDate.joinToString(),
+                    )
+                }
             } else {
-                DetailRow(
-                    title = stringResource(R.string.search_match_details_interests),
-                    value = stringResource(R.string.search_match_details_interests_none),
-                )
-            }
-            if (!breakdown?.commonSensoryPreferences.isNullOrEmpty()) {
-                DetailRow(
-                    title = stringResource(R.string.search_match_details_sensory),
-                    value = breakdown!!.commonSensoryPreferences.joinToString(),
-                )
-            }
-            if (!breakdown?.sharedLifestyle.isNullOrBlank()) {
-                DetailRow(
-                    title = stringResource(R.string.search_match_details_lifestyle),
-                    value = breakdown!!.sharedLifestyle.orEmpty(),
-                )
-            }
-            if (!breakdown?.commonIdealFirstDates.isNullOrEmpty()) {
-                DetailRow(
-                    title = stringResource(R.string.search_match_details_ideal_first_date),
-                    value = breakdown!!.commonIdealFirstDates.joinToString(),
+                Text(
+                    text = stringResource(R.string.search_match_details_upgrade_message),
+                    fontSize = 15.sp,
+                    color = colors.secondaryText,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-            TextButton(
-                onClick = onDismiss,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(colors.background),
-            ) {
-                Text(stringResource(R.string.common_got_it), color = colors.text)
+            Spacer(modifier = Modifier.height(16.dp))
+            if (showsFullBreakdown) {
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(50))
+                        .background(gotItBackground),
+                ) {
+                    Text(
+                        text = stringResource(R.string.common_got_it),
+                        color = colors.text,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(vertical = 4.dp),
+                    )
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(50))
+                            .background(gotItBackground),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.search_match_details_not_now),
+                            color = colors.text,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(vertical = 4.dp),
+                        )
+                    }
+                    TextButton(
+                        onClick = onUpgrade,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(50))
+                            .background(TabSelected),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.search_match_details_view_plans),
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(vertical = 4.dp),
+                        )
+                    }
+                }
             }
         }
     }

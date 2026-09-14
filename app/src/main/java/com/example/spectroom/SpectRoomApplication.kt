@@ -9,9 +9,15 @@ import org.maplibre.android.MapLibre
 class SpectRoomApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        instance = this
         MapLibre.getInstance(this)
         FirebaseApp.initializeApp(this)
         FirebasePhoneAuthDebug.applyIfNeeded(this)
         AppPrefsStore(this).applyStoredLocale()
+    }
+
+    companion object {
+        lateinit var instance: SpectRoomApplication
+            private set
     }
 }

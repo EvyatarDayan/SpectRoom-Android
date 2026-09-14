@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,10 +16,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -71,7 +70,10 @@ private data class OnboardingPage(
     val noticeLeadRes: Int? = null,
     val noticeBodyRes: Int? = null,
     @param:DrawableRes val imageRes: Int? = null,
-)
+) {
+    val hasNotice: Boolean get() = noticeLeadRes != null && noticeBodyRes != null
+    val showsImage: Boolean get() = imageRes != null
+}
 
 private val StepImageRes = listOf(
     R.drawable.onboarding_profile,
@@ -116,10 +118,11 @@ fun OnboardingScreen(
     val scope = rememberCoroutineScope()
     var dontShowAgain by remember { mutableStateOf(false) }
     val isLast = pagerState.currentPage == pages.lastIndex
+    // Match iOS UIColor(white: 0.78 / 0.28) — not black-with-alpha.
     val descriptionColor = if (colors.isDark) {
-        Color.White.copy(alpha = 0.78f)
+        Color(0.78f, 0.78f, 0.78f)
     } else {
-        Color.Black.copy(alpha = 0.72f)
+        Color(0.28f, 0.28f, 0.28f)
     }
 
     Box(
@@ -127,14 +130,12 @@ fun OnboardingScreen(
             .fillMaxSize()
             .background(colors.background),
     ) {
+        // Match iOS: TabView fills remaining space above footer controls.
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .navigationBarsPadding(),
         ) {
-            // Reserve space under the overlaid preference bar (approx bar height).
-            Spacer(modifier = Modifier.height(72.dp))
-
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier
@@ -153,6 +154,7 @@ fun OnboardingScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 30.dp)
                     .padding(bottom = 16.dp)
+                    .alpha(if (isLast) 1f else 0f)
                     .then(
                         if (isLast) {
                             Modifier.clickable { dontShowAgain = !dontShowAgain }
@@ -163,33 +165,30 @@ fun OnboardingScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Start,
             ) {
-                if (isLast) {
-                    Icon(
-                        imageVector = if (dontShowAgain) {
-                            Icons.Filled.CheckBox
-                        } else {
-                            Icons.Filled.CheckBoxOutlineBlank
-                        },
-                        contentDescription = null,
-                        tint = TabSelected,
-                        modifier = Modifier.size(22.dp),
-                    )
-                    Spacer(modifier = Modifier.size(10.dp))
-                    Text(
-                        text = stringResource(R.string.onboarding_dont_show_again),
-                        color = colors.text,
-                        fontSize = 14.sp,
-                    )
-                } else {
-                    Spacer(modifier = Modifier.height(22.dp))
-                }
+                Icon(
+                    imageVector = if (dontShowAgain) {
+                        Icons.Filled.CheckBox
+                    } else {
+                        Icons.Filled.CheckBoxOutlineBlank
+                    },
+                    contentDescription = null,
+                    tint = TabSelected,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(modifier = Modifier.size(10.dp))
+                Text(
+                    text = stringResource(R.string.onboarding_dont_show_again),
+                    color = colors.text,
+                    fontSize = 14.sp,
+                )
             }
 
+            // iOS: .padding(.horizontal, 30).padding(.bottom, 50)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 30.dp)
-                    .padding(bottom = 20.dp),
+                    .padding(bottom = 50.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (pagerState.currentPage > 0) {
@@ -199,6 +198,7 @@ fun OnboardingScreen(
                                 pagerState.animateScrollToPage(pagerState.currentPage - 1)
                             }
                         },
+                        contentPadding = PaddingValues(0.dp),
                     ) {
                         Text(
                             text = stringResource(R.string.onboarding_previous),
@@ -206,6 +206,8 @@ fun OnboardingScreen(
                             fontSize = 16.sp,
                         )
                     }
+                } else {
+                    Spacer(modifier = Modifier.size(1.dp))
                 }
                 Spacer(modifier = Modifier.weight(1f))
                 if (!isLast) {
@@ -226,6 +228,7 @@ fun OnboardingScreen(
                             text = stringResource(R.string.onboarding_next),
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 16.sp,
+                            color = Color.White,
                         )
                     }
                 } else {
@@ -242,21 +245,22 @@ fun OnboardingScreen(
                             text = stringResource(R.string.onboarding_get_started),
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 16.sp,
+                            color = Color.White,
                         )
                     }
                 }
             }
 
+            // iOS: HStack(spacing: 8), .padding(.bottom, 24)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 24.dp),
-                horizontalArrangement = Arrangement.Center,
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
             ) {
                 pages.indices.forEach { index ->
                     Box(
                         modifier = Modifier
-                            .padding(horizontal = 4.dp)
                             .size(8.dp)
                             .clip(CircleShape)
                             .background(
@@ -287,30 +291,34 @@ private fun OnboardingPageContent(
     descriptionColor: Color,
 ) {
     val colors = LocalSpectRoomColors.current
-    val isIntro = page.imageRes == null
     val screenHeight = LocalConfiguration.current.screenHeightDp
     val noticeMaxHeight = if (screenHeight >= 900) 380.dp else 180.dp
 
+    // Mirror iOS OnboardingPageView: VStack(spacing: 30) with flexible Spacers.
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        if (isIntro) {
-            Spacer(modifier = Modifier.height(12.dp))
+        if (page.hasNotice) {
+            Spacer(modifier = Modifier.height(48.dp))
         } else {
-            Spacer(modifier = Modifier.weight(1f, fill = true))
+            Spacer(modifier = Modifier.height(36.dp))
+            Spacer(modifier = Modifier.weight(1f))
         }
+
+        Spacer(modifier = Modifier.height(40.dp))
 
         page.imageRes?.let { currentImage ->
             OnboardingImageCarousel(currentImageRes = currentImage)
-            Spacer(modifier = Modifier.height(30.dp))
+            Spacer(modifier = Modifier.height(40.dp))
         }
 
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(if (isIntro) 20.dp else 16.dp),
+            verticalArrangement = Arrangement.spacedBy(if (page.showsImage) 52.dp else 60.dp),
+            modifier = Modifier.fillMaxWidth(),
         ) {
             page.stepRes?.let {
                 Text(
@@ -325,7 +333,8 @@ private fun OnboardingPageContent(
             if (page.titleLine1Res != null && page.titleLine2Res != null) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(top = 80.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(top = 88.dp),
                 ) {
                     Text(
                         text = stringResource(page.titleLine1Res),
@@ -357,22 +366,25 @@ private fun OnboardingPageContent(
                 text = stringResource(page.descriptionRes),
                 color = descriptionColor,
                 fontSize = 16.sp,
+                // iOS .body + lineSpacing(4) ≈ 20sp line height + 4
                 lineHeight = 24.sp,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(horizontal = 40.dp),
             )
         }
 
-        if (page.noticeLeadRes != null && page.noticeBodyRes != null) {
-            Spacer(modifier = Modifier.height(20.dp))
+        if (page.hasNotice) {
+            Spacer(modifier = Modifier.height(40.dp))
             NoticeCard(
-                lead = stringResource(page.noticeLeadRes),
-                body = stringResource(page.noticeBodyRes),
+                lead = stringResource(page.noticeLeadRes!!),
+                body = stringResource(page.noticeBodyRes!!),
                 maxHeight = noticeMaxHeight,
+                modifier = Modifier.padding(top = 28.dp),
             )
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.weight(1f))
         } else {
-            Spacer(modifier = Modifier.weight(1f, fill = true))
+            Spacer(modifier = Modifier.height(40.dp))
+            Spacer(modifier = Modifier.weight(1f))
         }
     }
 }
@@ -382,6 +394,7 @@ private fun NoticeCard(
     lead: String,
     body: String,
     maxHeight: Dp,
+    modifier: Modifier = Modifier,
 ) {
     val colors = LocalSpectRoomColors.current
     val text = buildAnnotatedString {
@@ -392,7 +405,7 @@ private fun NoticeCard(
         append(body)
     }
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp)
             .heightIn(max = maxHeight)
@@ -417,50 +430,47 @@ private fun NoticeCard(
 private fun OnboardingImageCarousel(
     @DrawableRes currentImageRes: Int,
 ) {
-    val screenHeight = LocalConfiguration.current.screenHeightDp
-    val centerMaxHeight = if (screenHeight >= 900) 220.dp else 260.dp
-    val sideMaxHeight = if (screenHeight >= 900) 160.dp else 190.dp
+    val screenHeightDp = LocalConfiguration.current.screenHeightDp
+    val centerMaxHeight = if (screenHeightDp >= 900) 260.dp else 300.dp
+    val sideMaxHeight = if (screenHeightDp >= 900) 190.dp else 220.dp
     val index = StepImageRes.indexOf(currentImageRes).coerceAtLeast(0)
     val leftRes = StepImageRes[(index - 1 + StepImageRes.size) % StepImageRes.size]
     val rightRes = StepImageRes[(index + 1) % StepImageRes.size]
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(centerMaxHeight)
-            .padding(top = 20.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Image(
-            painter = painterResource(leftRes),
-            contentDescription = null,
-            contentScale = ContentScale.Fit,
+    Column(modifier = Modifier.padding(top = 40.dp)) {
+        Row(
             modifier = Modifier
-                .height(sideMaxHeight)
-                .align(Alignment.CenterStart)
-                .offset(x = (-12).dp)
-                .alpha(0.35f)
-                .zIndex(0f),
-        )
-        Image(
-            painter = painterResource(rightRes),
-            contentDescription = null,
-            contentScale = ContentScale.Fit,
-            modifier = Modifier
-                .height(sideMaxHeight)
-                .align(Alignment.CenterEnd)
-                .offset(x = 12.dp)
-                .alpha(0.35f)
-                .zIndex(0f),
-        )
-        Image(
-            painter = painterResource(currentImageRes),
-            contentDescription = null,
-            contentScale = ContentScale.Fit,
-            modifier = Modifier
-                .fillMaxWidth(0.62f)
-                .height(centerMaxHeight)
-                .zIndex(1f),
-        )
+                .fillMaxWidth()
+                .height(centerMaxHeight),
+            horizontalArrangement = Arrangement.spacedBy((-36).dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Image(
+                painter = painterResource(leftRes),
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .heightIn(max = sideMaxHeight)
+                    .alpha(0.35f)
+                    .zIndex(0f),
+            )
+            Image(
+                painter = painterResource(currentImageRes),
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .heightIn(max = centerMaxHeight)
+                    .zIndex(1f),
+            )
+            Image(
+                painter = painterResource(rightRes),
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .heightIn(max = sideMaxHeight)
+                    .alpha(0.35f)
+                    .zIndex(0f),
+            )
+        }
     }
 }

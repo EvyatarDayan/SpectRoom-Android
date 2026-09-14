@@ -1,11 +1,13 @@
 package com.example.spectroom.repository
 
+import com.example.spectroom.data.model.AdminSender
 import com.example.spectroom.data.model.ConversationDisplay
 import com.example.spectroom.data.model.ConversationMessagesPage
 import com.example.spectroom.data.model.MatchDisplay
 import com.example.spectroom.data.model.MessageDisplay
 import com.example.spectroom.data.model.MessageType
 import com.example.spectroom.data.model.ModerationNotice
+import com.example.spectroom.data.model.PlanTier
 import com.example.spectroom.data.model.ProfileCard
 import com.example.spectroom.data.model.SpectRoomUser
 import com.example.spectroom.data.model.SwipeType
@@ -24,6 +26,7 @@ import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
+import com.google.firebase.firestore.Source
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -58,14 +61,14 @@ sealed class AuthResult {
     data class MfaRequired(val message: String = "SMS verification required") : AuthResult()
     data class Error(val message: String) : AuthResult()
     data class Banned(val message: String) : AuthResult()
-    data class Frozen(val until: Date, val message: String) : AuthResult()
+    data class Frozen(val until: Date, val message: String, val hours: Int = 24) : AuthResult()
     data class Deleted(val message: String) : AuthResult()
 }
 
 sealed class AccessGate {
     data object Allowed : AccessGate()
     data class Banned(val message: String) : AccessGate()
-    data class Frozen(val until: Date, val message: String) : AccessGate()
+    data class Frozen(val until: Date, val message: String, val hours: Int = 24) : AccessGate()
     data class Deleted(val message: String) : AccessGate()
 }
 
@@ -111,18 +114,9 @@ class AuthRepository(
         val user = result.user ?: return AuthResult.Error("Sign-in failed")
         when (val gate = evaluateAccessGate(user.uid)) {
             is AccessGate.Allowed -> AuthResult.Success(user)
-            is AccessGate.Banned -> {
-                auth.signOut()
-                AuthResult.Banned(gate.message)
-            }
-            is AccessGate.Frozen -> {
-                auth.signOut()
-                AuthResult.Frozen(gate.until, gate.message)
-            }
-            is AccessGate.Deleted -> {
-                auth.signOut()
-                AuthResult.Deleted(gate.message)
-            }
+            is AccessGate.Banned -> AuthResult.Banned(gate.message)
+            is AccessGate.Frozen -> AuthResult.Frozen(gate.until, gate.message, gate.hours)
+            is AccessGate.Deleted -> AuthResult.Deleted(gate.message)
         }
     } catch (e: Exception) {
         AuthResult.Error(e.message ?: "Sign-in failed")
@@ -143,6 +137,7 @@ class AuthRepository(
             return AccessGate.Frozen(
                 until = freezeUntil,
                 message = "Your account is temporarily frozen.",
+                hours = freezeDurationHours(snapshot.getLong("discoverFreezeHours")?.toInt(), freezeUntil),
             )
         }
         return AccessGate.Allowed
@@ -286,11 +281,31 @@ class AuthRepository(
             (message.contains("already") || message.contains("in use") || message.contains("exists"))
     }
 
-    suspend fun fetchCurrentUserProfile(): SpectRoomUser? {
+    suspend fun fetchCurrentUserProfile(fromServer: Boolean = false): SpectRoomUser? {
         val uid = currentUid ?: return null
-        val snapshot = db.collection("users").document(uid).get().await()
+        val reference = db.collection("users").document(uid)
+        val snapshot = if (fromServer) {
+            reference.get(Source.SERVER).await()
+        } else {
+            reference.get().await()
+        }
         if (!snapshot.exists()) return null
         return snapshot.toSpectRoomUser(uid)
+    }
+
+    /** Live updates when iOS (or another client) changes `planTier` on the user document. */
+    fun observePlanTier(): Flow<PlanTier> = callbackFlow {
+        val uid = currentUid
+        if (uid == null) {
+            close()
+            return@callbackFlow
+        }
+        val registration = db.collection("users").document(uid)
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot == null || !snapshot.exists()) return@addSnapshotListener
+                trySend(PlanTier.fromRaw(snapshot.getString("planTier")))
+            }
+        awaitClose { registration.remove() }
     }
 
     suspend fun saveUserProfile(user: SpectRoomUser): Result<SpectRoomUser> {
@@ -335,6 +350,25 @@ class AuthRepository(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    suspend fun updatePlanTier(tier: PlanTier) {
+        val uid = currentUid ?: return
+        db.collection("users").document(uid).set(
+            mapOf("planTier" to tier.rawValue),
+            SetOptions.merge(),
+        ).await()
+    }
+
+    suspend fun activateProfileBoost(activeUntilMillis: Long, lastBoostAtMillis: Long = System.currentTimeMillis()) {
+        val uid = currentUid ?: return
+        db.collection("users").document(uid).set(
+            mapOf(
+                "boostedUntil" to activeUntilMillis / 1000.0,
+                "lastProfileBoostAt" to lastBoostAtMillis / 1000.0,
+            ),
+            SetOptions.merge(),
+        ).await()
     }
 
     suspend fun updateEnergyLevel(level: Int) {
@@ -528,6 +562,13 @@ fun DocumentSnapshot.toSpectRoomUser(uid: String): SpectRoomUser {
         sensoryPreferences = get("sensoryPreferences") as? List<String> ?: emptyList(),
         shareSensoryPreferences = getBoolean("shareSensoryPreferences") ?: false,
         energyLevel = (get("energyLevel") as? Number)?.toInt() ?: 4,
+        planTier = PlanTier.fromRaw(getString("planTier")),
+        lastProfileBoostAtMillis = (get("lastProfileBoostAt") as? Number)?.toDouble()?.let { (it * 1000).toLong() }
+            ?: (get("lastProfileBoostAt") as? Number)?.toLong(),
+        boostedUntilMillis = (get("boostedUntil") as? Number)?.toDouble()?.let { seconds ->
+            val millis = if (seconds < 10_000_000_000.0) (seconds * 1000).toLong() else seconds.toLong()
+            millis
+        },
     )
 }
 
@@ -551,8 +592,11 @@ fun DocumentSnapshot.toPendingModerationNotice(): ModerationNotice? {
         val until = parseFreezeUntilValue(pendingFreeze["freeze_until"])
             ?: parseDiscoverFrozenUntil(this)
         if (until != null && until.after(Date())) {
-            val hours = (pendingFreeze["hours"] as? Number)?.toInt()
-                ?: maxOf(1, ((until.time - System.currentTimeMillis()) / 3_600_000L).toInt())
+            val hours = freezeDurationHours(
+                (pendingFreeze["hours"] as? Number)?.toInt()
+                    ?: (get("discoverFreezeHours") as? Number)?.toInt(),
+                until,
+            )
             return ModerationNotice.FreezeAcknowledgement(until, hours)
         }
     }
@@ -560,14 +604,37 @@ fun DocumentSnapshot.toPendingModerationNotice(): ModerationNotice? {
     if (warning != null && warning["acknowledged"] as? Boolean != true) {
         val message = warning["message"] as? String
             ?: "Your account was recently reported for content or behavior that violates our guidelines."
-        return ModerationNotice.Warning(message)
+        val noticeId = (warning["notice_id"] as? String)?.takeIf { it.isNotBlank() }
+            ?: (warning["report_id"] as? String)?.takeIf { it.isNotBlank() }
+        val createdAt = (warning["created_at"] as? Number)?.toDouble()
+        return ModerationNotice.Warning(
+            message = message,
+            noticeId = noticeId,
+            createdAtSeconds = createdAt,
+        )
     }
     val activeFreeze = parseDiscoverFrozenUntil(this)
     if (activeFreeze != null && activeFreeze.after(Date())) {
-        val hours = maxOf(1, ((activeFreeze.time - System.currentTimeMillis()) / 3_600_000L).toInt())
+        val hours = freezeDurationHours(
+            (get("discoverFreezeHours") as? Number)?.toInt(),
+            activeFreeze,
+        )
         return ModerationNotice.FreezeAcknowledgement(activeFreeze, hours)
     }
     return null
+}
+
+/** Original freeze length (24 / 48 / 72), never remaining time. */
+fun freezeDurationHours(storedHours: Int?, until: Date): Int {
+    val stored = storedHours ?: 0
+    if (stored == 24 || stored == 48 || stored == 72) return stored
+    val remainingHours = ((until.time - System.currentTimeMillis()) / 3_600_000.0)
+        .coerceAtLeast(0.0)
+    return when {
+        remainingHours <= 24 -> 24
+        remainingHours <= 48 -> 48
+        else -> 72
+    }
 }
 
 fun parseDiscoverFrozenUntil(snapshot: DocumentSnapshot): Date? {
@@ -843,8 +910,13 @@ class DiscoverRepository(
         return users
     }
 
-    fun toProfileCard(user: SpectRoomUser, currentUser: SpectRoomUser, maxDistanceKm: Double?): ProfileCard {
-        val distance = distanceString(currentUser.location, user.location, maxDistanceKm)
+    fun toProfileCard(
+        user: SpectRoomUser,
+        currentUser: SpectRoomUser,
+        maxDistanceKm: Double?,
+        forMatches: Boolean = false,
+    ): ProfileCard {
+        val distance = distanceString(currentUser.location, user.location, maxDistanceKm, forMatches)
         val percentage = MatchScoring.calculatePercentage(
             interests = user.interests,
             age = user.age,
@@ -883,6 +955,7 @@ class DiscoverRepository(
             shareSensoryPreferences = user.shareSensoryPreferences,
             energyLevel = user.energyLevel,
             matchPercentage = percentage,
+            planTier = user.planTier,
         )
     }
 
@@ -890,16 +963,21 @@ class DiscoverRepository(
         from: UserLocation,
         to: UserLocation,
         maxDistanceKm: Double?,
+        forMatches: Boolean = false,
     ): String {
         val lat1 = from.latitude
         val lon1 = from.longitude
         val lat2 = to.latitude
         val lon2 = to.longitude
         if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) {
-            return if (maxDistanceKm == null) "Nearby" else "—"
+            return if (maxDistanceKm == null) {
+                if (forMatches) "1 km away" else "Nearby"
+            } else {
+                "—"
+            }
         }
         val km = DiscoverEligibility.haversineKm(lat1, lon1, lat2, lon2)
-        return DiscoverEligibility.formatDistanceKm(km)
+        return DiscoverEligibility.formatDistanceKm(km, forMatches = forMatches)
     }
 
     private fun effectivePassCount(passDocs: List<Map<String, Any>>): Int {
@@ -977,7 +1055,12 @@ class MatchRepository(
             val otherUser = otherDoc.toSpectRoomUser(otherUserId)
             matches += MatchDisplay(
                 id = document.id,
-                otherUser = discoverRepository.toProfileCard(otherUser, currentUser, maxDistanceKm = null),
+                otherUser = discoverRepository.toProfileCard(
+                    otherUser,
+                    currentUser,
+                    maxDistanceKm = null,
+                    forMatches = true,
+                ),
                 matchedAt = Date((matchedAt * 1000).toLong()),
                 lastMessageAt = null,
             )
@@ -1029,6 +1112,7 @@ class MatchRepository(
                                     otherUser,
                                     currentUser,
                                     maxDistanceKm = null,
+                                    forMatches = true,
                                 ),
                                 matchedAt = Date((matchedAt * 1000).toLong()),
                                 lastMessageAt = null,
@@ -1063,7 +1147,7 @@ class MessageRepository(
                     if (change.type != DocumentChange.Type.ADDED) continue
                     val data = change.document.data ?: continue
                     val senderId = data["senderId"] as? String
-                    if (senderId.isNullOrBlank() || senderId == uid) continue
+                    if (senderId.isNullOrBlank() || senderId == uid || AdminSender.isAdmin(senderId)) continue
                     val createdAtMs = firestoreCreatedAtMillis(data) ?: continue
                     val ageMs = now - createdAtMs
                     if (ageMs > 30_000L || ageMs < -5_000L) continue
@@ -1078,6 +1162,34 @@ class MessageRepository(
                 }
             }
         awaitClose { registration.remove() }
+    }
+
+    suspend fun persistAdminWarningMessage(
+        message: String,
+        noticeId: String?,
+        createdAtSeconds: Double?,
+    ) {
+        val uid = auth.currentUser?.uid ?: return
+        val trimmed = message.trim()
+        if (trimmed.isBlank()) return
+        val createdAt = createdAtSeconds?.takeIf { it > 0 } ?: (Date().time / 1000.0)
+        val documentId = noticeId?.takeIf { it.isNotBlank() && !it.contains('/') }
+            ?: "admin-warning-${(createdAt * 1000).toLong()}"
+        val ref = db.collection("users").document(uid).collection("incomingMessages").document(documentId)
+        if (ref.get().await().exists()) return
+        ref.set(
+            mapOf(
+                "id" to documentId,
+                "senderId" to AdminSender.ID,
+                "recipientId" to uid,
+                "content" to trimmed,
+                "type" to "text",
+                "createdAt" to createdAt,
+                "isRead" to false,
+                "readAt" to null,
+                "fromAdmin" to true,
+            ),
+        ).await()
     }
 
     suspend fun markMessagesAsRead(fromUserId: String) {
@@ -1095,6 +1207,7 @@ class MessageRepository(
     }
 
     suspend fun resolveSenderProfile(senderId: String): Pair<String, String?> {
+        if (AdminSender.isAdmin(senderId)) return AdminSender.DISPLAY_NAME to null
         val doc = db.collection("users").document(senderId).get().await()
         return (doc.getString("name") ?: "Match") to doc.getString("profilePhotoURL")
     }
@@ -1129,6 +1242,7 @@ class MessageRepository(
     private suspend fun sendMessage(recipientId: String, content: String, type: String): String {
         val normalizedRecipientId = recipientId.trim()
         require(normalizedRecipientId.isNotEmpty()) { "Invalid recipient" }
+        require(!AdminSender.isAdmin(normalizedRecipientId)) { "Cannot reply to SpectRoom" }
         val uid = auth.currentUser?.uid ?: error("Not signed in")
         val messageId = UUID.randomUUID().toString()
         val payload = hashMapOf<String, Any?>(
@@ -1157,14 +1271,19 @@ class MessageRepository(
         before: Date? = null,
     ): ConversationMessagesPage {
         val uid = auth.currentUser?.uid ?: return ConversationMessagesPage(emptyList(), false)
-        val sent = fetchFilteredMessageDocuments(
-            collection = "sentMessages",
-            filterField = "recipientId",
-            filterValue = otherUserId,
-            userId = uid,
-            limit = limit,
-            before = before,
-        )
+        val isAdminThread = AdminSender.isAdmin(otherUserId)
+        val sent = if (isAdminThread) {
+            emptyList()
+        } else {
+            fetchFilteredMessageDocuments(
+                collection = "sentMessages",
+                filterField = "recipientId",
+                filterValue = otherUserId,
+                userId = uid,
+                limit = limit,
+                before = before,
+            )
+        }
         val incoming = fetchFilteredMessageDocuments(
             collection = "incomingMessages",
             filterField = "senderId",
@@ -1175,10 +1294,19 @@ class MessageRepository(
         )
 
         val meName = auth.currentUser?.displayName ?: "You"
-        val otherDoc = db.collection("users").document(otherUserId).get().await()
-        val otherName = otherDoc.getString("name") ?: "Match"
-        val otherPhoto = otherDoc.getString("profilePhotoURL")
-        val myPhoto = db.collection("users").document(uid).get().await().getString("profilePhotoURL")
+        val otherName: String
+        val otherPhoto: String?
+        val myPhoto: String?
+        if (isAdminThread) {
+            otherName = AdminSender.DISPLAY_NAME
+            otherPhoto = null
+            myPhoto = db.collection("users").document(uid).get().await().getString("profilePhotoURL")
+        } else {
+            val otherDoc = db.collection("users").document(otherUserId).get().await()
+            otherName = otherDoc.getString("name") ?: "Match"
+            otherPhoto = otherDoc.getString("profilePhotoURL")
+            myPhoto = db.collection("users").document(uid).get().await().getString("profilePhotoURL")
+        }
 
         val merged = mutableListOf<MessageDisplay>()
         for (doc in sent) {
@@ -1397,7 +1525,11 @@ class MessageRepository(
             id = data["id"] as? String ?: docId,
             content = data["content"] as? String ?: "",
             messageType = MessageType.fromRaw(data["type"] as? String ?: "text"),
-            senderName = if (isOutgoing) meName else otherName,
+            senderName = when {
+                isOutgoing -> meName
+                AdminSender.isAdmin(senderId) -> AdminSender.DISPLAY_NAME
+                else -> otherName
+            },
             recipientName = if (isOutgoing) otherName else meName,
             senderId = senderId,
             recipientId = recipientId,
@@ -1457,24 +1589,38 @@ class MessageRepository(
         val unreadBySender = fetchUnreadCountsBySender()
         return latestByPartner.values.sortedByDescending { it.createdAt }.map { latest ->
             val messageDate = Date((latest.createdAt * 1000).toLong())
-            val other = db.collection("users").document(latest.partnerId).get().await()
             val preview = when {
                 latest.content.contains("voice_messages") -> "🎙️ Voice message"
                 latest.content.startsWith("http") && latest.content.contains("message_images") -> "📷 Photo"
                 latest.content.startsWith("http") && latest.content.contains("firebasestorage") -> "📷 Photo"
                 else -> latest.content.ifBlank { "No messages yet" }
             }
-            ConversationDisplay(
-                id = latest.partnerId,
-                otherUserId = latest.partnerId,
-                otherUserName = other.getString("name") ?: "Match",
-                otherUserPhotoURL = other.getString("profilePhotoURL"),
-                lastMessage = preview,
-                lastMessageAt = messageDate,
-                timestamp = "",
-                isOnline = other.getBoolean("isOnline") ?: false,
-                unreadCount = unreadBySender[latest.partnerId] ?: 0,
-            )
+            if (AdminSender.isAdmin(latest.partnerId)) {
+                ConversationDisplay(
+                    id = latest.partnerId,
+                    otherUserId = latest.partnerId,
+                    otherUserName = AdminSender.DISPLAY_NAME,
+                    otherUserPhotoURL = null,
+                    lastMessage = preview,
+                    lastMessageAt = messageDate,
+                    timestamp = "",
+                    isOnline = false,
+                    unreadCount = unreadBySender[latest.partnerId] ?: 0,
+                )
+            } else {
+                val other = db.collection("users").document(latest.partnerId).get().await()
+                ConversationDisplay(
+                    id = latest.partnerId,
+                    otherUserId = latest.partnerId,
+                    otherUserName = other.getString("name") ?: "Match",
+                    otherUserPhotoURL = other.getString("profilePhotoURL"),
+                    lastMessage = preview,
+                    lastMessageAt = messageDate,
+                    timestamp = "",
+                    isOnline = other.getBoolean("isOnline") ?: false,
+                    unreadCount = unreadBySender[latest.partnerId] ?: 0,
+                )
+            }
         }
     }
 

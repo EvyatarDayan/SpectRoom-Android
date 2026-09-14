@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="76dp"
+    android:height="76dp"
+    android:viewportWidth="76"
+    android:viewportHeight="76"
+    android:autoMirrored="false">
+    <!-- iOS Color.green / systemGreen -->
+    <path
+        android:fillColor="#34C759"
+        android:pathData="M38,38m-38,0a38,38 0,1,1 76,0a38,38 0,1,1 -76,0" />
+    <!-- Standard checkmark: vertex at the bottom (not a caret ^) -->
+    <path
+        android:pathData="M21,39.5 L32.5,51 L55.5,26"
+        android:strokeWidth="7.5"
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+</vector>

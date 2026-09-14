@@ -11,21 +11,26 @@ import com.example.spectroom.data.local.DiscoverDeckCache
 import com.example.spectroom.data.local.DiscoverDeckFilterSignature
 import com.example.spectroom.data.local.DiscoverDistanceStore
 import com.example.spectroom.data.local.LocalNotificationHelper
+import com.example.spectroom.data.local.MediaDailyLimitStore
 import com.example.spectroom.data.local.MessagesExport
 import com.example.spectroom.data.local.MessagesExportConversation
+import com.example.spectroom.data.local.PlanEntitlementsStore
+import com.example.spectroom.data.local.ProfileBoostLimitStore
 import com.example.spectroom.data.local.SoundService
+import com.example.spectroom.data.model.AdminSender
 import com.example.spectroom.data.model.AdminUserProfile
 import com.example.spectroom.data.model.AppLanguage
 import com.example.spectroom.data.model.ModerationFreezeDuration
 import com.example.spectroom.data.model.ModerationNotice
+import com.example.spectroom.data.model.PlanTier
 import com.example.spectroom.data.model.SupportTopic
 import com.example.spectroom.data.model.UserReport
+import com.example.spectroom.R
 import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
 import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.tasks.await
 import androidx.core.content.FileProvider
-import com.example.spectroom.R
 import com.example.spectroom.repository.AccessGate
 import com.example.spectroom.repository.AdminRepository
 import com.example.spectroom.data.model.BlockedUser
@@ -45,6 +50,7 @@ import com.example.spectroom.data.remote.AddressSearchRepository
 import com.example.spectroom.data.remote.AddressSuggestion
 import com.example.spectroom.data.remote.MfaAuthRepository
 import com.example.spectroom.data.remote.MfaSignInResult
+import com.example.spectroom.data.remote.MockBillingService
 import com.example.spectroom.data.remote.PhotoStorageRepository
 import com.example.spectroom.data.remote.VoiceMessageRepository
 import com.example.spectroom.data.remote.toUserLocation
@@ -57,8 +63,8 @@ import com.example.spectroom.repository.DiscoverRepository
 import com.example.spectroom.repository.MatchRepository
 import com.example.spectroom.repository.MessageRepository
 import com.example.spectroom.repository.ModerationRepository
+import com.example.spectroom.ui.navigation.MainTab
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.isActive
@@ -68,7 +74,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
-import java.text.DateFormat
 import java.util.Date
 import java.util.UUID
 
@@ -202,7 +207,10 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
     private val addressSearchRepository = AddressSearchRepository(application)
     private val voiceMessageRepository = VoiceMessageRepository(application)
     private val mfaAuthRepository = MfaAuthRepository()
-    private val dailyLimitStore = DiscoverDailyLimitStore(application)
+    private val planEntitlementsStore = PlanEntitlementsStore(application)
+    private val dailyLimitStore = DiscoverDailyLimitStore(application, planEntitlementsStore)
+    private val mediaDailyLimitStore = MediaDailyLimitStore(application, planEntitlementsStore)
+    private val profileBoostLimitStore = ProfileBoostLimitStore(application, planEntitlementsStore)
     private val distanceStore = DiscoverDistanceStore(application)
     private val discoverDeckCache = DiscoverDeckCache(application)
     private val appPrefs = AppPrefsStore(application)
@@ -267,6 +275,21 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
 
     private val _showHelpSupport = MutableStateFlow(false)
     val showHelpSupport: StateFlow<Boolean> = _showHelpSupport.asStateFlow()
+
+    private val _showAccountBilling = MutableStateFlow(false)
+    val showAccountBilling: StateFlow<Boolean> = _showAccountBilling.asStateFlow()
+
+    private val _currentPlanTier = MutableStateFlow(planEntitlementsStore.currentPlanTier)
+    val currentPlanTierState: StateFlow<PlanTier> = _currentPlanTier.asStateFlow()
+
+    /** Ignores stale Firestore plan snapshots right after an Android-initiated change. */
+    private var localPlanWriteAtMillis: Long = 0L
+
+    private val _showMediaLimitOverlay = MutableStateFlow(false)
+    val showMediaLimitOverlay: StateFlow<Boolean> = _showMediaLimitOverlay.asStateFlow()
+
+    private val _showUndoLimitOverlay = MutableStateFlow(false)
+    val showUndoLimitOverlay: StateFlow<Boolean> = _showUndoLimitOverlay.asStateFlow()
 
     private val _helpLockedTopic = MutableStateFlow<SupportTopic?>(null)
     val helpLockedTopic: StateFlow<SupportTopic?> = _helpLockedTopic.asStateFlow()
@@ -405,15 +428,19 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun shouldShowPhotoShareWarning(): Boolean = !appPrefs.skipPhotoShareWarning
+    fun registerPhotoShareMediaTapAndShouldShow(): Boolean =
+        appPrefs.registerPhotoShareMediaTapAndShouldShow(authRepository.accountKey)
 
-    fun setSkipPhotoShareWarning(skip: Boolean) {
-        if (skip) appPrefs.skipPhotoShareWarning = true
+    fun resetPhotoShareWarning() {
+        appPrefs.resetPhotoShareWarning(authRepository.accountKey)
     }
 
     fun dismissModerationNotice() {
         val notice = _moderationNotice.value ?: return
         viewModelScope.launch {
+            if (notice is ModerationNotice.Warning) {
+                persistAdminWarningMessage(notice)
+            }
             runCatching { authRepository.acknowledgeModerationNotice(notice) }
             _moderationNotice.value = null
             if (notice.signsOutOnDismiss) {
@@ -428,6 +455,10 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
 
     fun clearExportShareUri() {
         _exportShareUri.value = null
+    }
+
+    fun shareExportedPdf(uri: android.net.Uri) {
+        _exportShareUri.value = uri
     }
 
     fun exportMessages() {
@@ -578,9 +609,22 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
 
     fun refreshCurrentUserProfile() {
         viewModelScope.launch {
-            runCatching { authRepository.fetchCurrentUserProfile() }.getOrNull()?.let { profile ->
-                _uiState.update { it.copy(currentUser = profile) }
+            runCatching { authRepository.fetchCurrentUserProfile(fromServer = true) }.getOrNull()?.let { profile ->
+                val resolved = applyPlanEntitlementsFromUser(profile)
+                _uiState.update { it.copy(currentUser = resolved) }
             }
+        }
+    }
+
+    fun showAccountBilling() {
+        viewModelScope.launch {
+            runCatching { authRepository.fetchCurrentUserProfile(fromServer = true) }.getOrNull()?.let { profile ->
+                val resolved = applyPlanEntitlementsFromUser(profile)
+                _uiState.update { it.copy(currentUser = resolved) }
+            } ?: run {
+                MockBillingService.shared.alignWithPlanTier(planEntitlementsStore.currentPlanTier)
+            }
+            _showAccountBilling.value = true
         }
     }
 
@@ -624,6 +668,11 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             }
         }
         if (tab == 0 || tab == 1) refreshSocial()
+        // Mirror iOS SearchView.handleSelectedTabChange: re-read local-day quota when
+        // opening Discover so a midnight rollover unlocks the deck without a cold start.
+        if (tab == MainTab.HOME.index) {
+            refreshDiscoverDailyLimitIfNeeded(reloadDeckIfUnlocked = true)
+        }
     }
 
     fun setOnline(isOnline: Boolean) {
@@ -632,6 +681,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             runCatching { authRepository.updateOnlineStatus(isOnline) }
             if (isOnline) {
+                refreshDiscoverDailyLimitIfNeeded(reloadDeckIfUnlocked = true)
                 startPresenceHeartbeat()
                 val tab = _uiState.value.selectedTab
                 val partnerId = _uiState.value.activeChatPartnerId
@@ -715,6 +765,88 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         _supportSendSucceeded.value = false
     }
 
+    fun hideAccountBilling() {
+        _showAccountBilling.value = false
+        refreshDiscoverStateAfterBillingChange()
+    }
+
+    fun currentPlanTier(): PlanTier = _currentPlanTier.value
+
+    fun canSendChatMedia(): Boolean = mediaDailyLimitStore.canSend(authRepository.accountKey)
+
+    fun mediaRemainingToday(): Int = mediaDailyLimitStore.remaining(authRepository.accountKey)
+
+    fun mediaLimitMessageRes(): Int = when (planEntitlementsStore.currentPlanTier) {
+        PlanTier.FREE -> R.string.messages_media_limit_message_free
+        PlanTier.PRO -> R.string.messages_media_limit_message_pro
+        PlanTier.PREMIUM -> R.string.messages_media_limit_message_premium
+    }
+
+    fun showMediaLimitOverlay() {
+        _showMediaLimitOverlay.value = true
+    }
+
+    fun hideMediaLimitOverlay() {
+        _showMediaLimitOverlay.value = false
+    }
+
+    fun hideUndoLimitOverlay() {
+        _showUndoLimitOverlay.value = false
+    }
+
+    fun onBillingPlanChanged(tier: PlanTier) {
+        markLocalPlanWrite()
+        resolvePlanTier(tier)
+        viewModelScope.launch {
+            pushPlanTierToFirestore(tier)
+            _uiState.update { state ->
+                val user = state.currentUser ?: return@update state
+                state.copy(currentUser = user.copy(planTier = tier))
+            }
+            refreshDiscoverStateAfterBillingChange()
+            ensureAutomaticProfileBoost()
+        }
+    }
+
+    fun refreshDiscoverStateAfterBillingChange() {
+        val accountKey = authRepository.accountKey
+        val freshCount = dailyLimitStore.currentCount(accountKey)
+        val max = dailyLimitStore.maxSwipesPerDay()
+        _discoverState.update {
+            it.copy(
+                dailySwipeCount = freshCount,
+                hasUsedSecondThoughtsToday = dailyLimitStore.hasUsedSecondThoughtsToday(accountKey),
+            )
+        }
+        if (freshCount < max && !_discoverState.value.isReviewingTodaysPasses) {
+            // Unlock deck after upgrade without forcing a full reload.
+        }
+    }
+
+    /**
+     * Plan-based Discover visibility boost — activated automatically when the plan
+     * allows it and the cooldown has elapsed (no manual Profile Boost UI).
+     */
+    fun ensureAutomaticProfileBoost() {
+        val accountKey = authRepository.accountKey
+        if (!profileBoostLimitStore.canActivate(accountKey)) return
+        val now = System.currentTimeMillis()
+        val until = now + ProfileBoostLimitStore.ACTIVE_DURATION_MS
+        profileBoostLimitStore.recordActivation(accountKey, now)
+        viewModelScope.launch {
+            runCatching { authRepository.activateProfileBoost(until, now) }
+            _uiState.update { state ->
+                val user = state.currentUser ?: return@update state
+                state.copy(
+                    currentUser = user.copy(
+                        lastProfileBoostAtMillis = now,
+                        boostedUntilMillis = until,
+                    ),
+                )
+            }
+        }
+    }
+
     fun submitSupportTicket(topic: SupportTopic, message: String) {
         val user = _uiState.value.currentUser
         viewModelScope.launch {
@@ -722,20 +854,27 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             _supportError.value = null
             runCatching {
                 val label = getApplication<Application>().getString(topic.labelRes)
+                val uid = authRepository.currentUid
+                if (uid.isNullOrBlank()) {
+                    error("Sign in to send a support message, or email spectroom.support@gmail.com")
+                }
                 moderationRepository.submitSupportTicket(
                     topicLabel = "${topic.subjectPrefix} $label",
                     message = message,
                     userName = user?.name.orEmpty().ifBlank { "Unknown" },
-                    userEmail = user?.email.orEmpty(),
+                    userEmail = user?.email.orEmpty().ifBlank {
+                        authRepository.currentEmail.orEmpty()
+                    },
                 )
             }.onSuccess {
+                _isSendingSupport.value = false
                 _supportSendSucceeded.value = true
-                delay(350)
+                delay(2_000)
                 hideHelpSupport()
             }.onFailure { error ->
+                _isSendingSupport.value = false
                 _supportError.value = error.message ?: "Could not send message"
             }
-            _isSendingSupport.value = false
         }
     }
 
@@ -928,12 +1067,18 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 val user = discoverRepository.fetchUsersByIds(listOf(profileId)).firstOrNull()
                     ?: return@runCatching
                 val card = discoverRepository.toProfileCard(user, current, maxDistanceKm = null)
+                val matchCard = discoverRepository.toProfileCard(
+                    user,
+                    current,
+                    maxDistanceKm = null,
+                    forMatches = true,
+                )
                 _uiState.update { it.copy(viewingProfile = card) }
                 _socialState.update { social ->
                     social.copy(
                         matches = social.matches.map { match ->
                             if (match.otherUser.userId == profileId) {
-                                match.copy(otherUser = card)
+                                match.copy(otherUser = matchCard)
                             } else {
                                 match
                             }
@@ -1441,8 +1586,15 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         )
     }
 
+    fun showsFullMatchBreakdown(): Boolean =
+        planEntitlementsStore.currentPlanTier.showsFullMatchBreakdown
+
     fun startVoiceRecording() {
-        if (_uiState.value.chatBlockedByPartner) return
+        if (_uiState.value.chatBlockedByPartner || AdminSender.isAdmin(_uiState.value.activeChatPartnerId)) return
+        if (!mediaDailyLimitStore.canSend(authRepository.accountKey)) {
+            _showMediaLimitOverlay.value = true
+            return
+        }
         viewModelScope.launch {
             voiceMessageRepository.startRecording().onSuccess {
                 _uiState.update {
@@ -1510,8 +1662,13 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun sendPendingVoiceMessage() {
-        if (_uiState.value.chatBlockedByPartner) {
+        if (_uiState.value.chatBlockedByPartner || AdminSender.isAdmin(_uiState.value.activeChatPartnerId)) {
             discardPendingVoicePreview()
+            return
+        }
+        val accountKey = authRepository.accountKey
+        if (!mediaDailyLimitStore.canSend(accountKey)) {
+            _showMediaLimitOverlay.value = true
             return
         }
         val partnerId = _uiState.value.activeChatPartnerId ?: return
@@ -1519,9 +1676,12 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         val duration = pendingVoiceDuration
         viewModelScope.launch {
             _socialState.update { it.copy(isSendingMessage = true) }
-            runCatching {
+            val result = runCatching {
                 val url = voiceMessageRepository.uploadVoice(file)
                 messageRepository.sendVoiceMessage(partnerId, url, duration)
+            }
+            if (result.isSuccess) {
+                mediaDailyLimitStore.recordSend(accountKey)
             }
             file.delete()
             pendingVoiceFile = null
@@ -1576,6 +1736,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun signUp(name: String, email: String, password: String, phoneE164: String) {
+        if (_uiState.value.isAuthLoading) return
         viewModelScope.launch {
             _uiState.update { it.copy(isAuthLoading = true, authError = null, authNotice = null) }
             appPrefs.pendingMfaPhoneE164 = phoneE164
@@ -1589,12 +1750,17 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                         it.copy(
                             isNewSignup = true,
                             hasCompletedInitialProfile = false,
-                            isAuthLoading = false,
-                            showingCompleteProfileWelcome = true,
                             mfaResolvedPhoneE164 = phoneE164,
                         )
                     }
-                    refreshSession()
+                    runCatching { refreshSession() }.onFailure { error ->
+                        _uiState.update {
+                            it.copy(
+                                isAuthLoading = false,
+                                authError = error.message ?: "Sign-up failed",
+                            )
+                        }
+                    }
                 }
                 is AuthResult.MfaRequired -> {
                     appPrefs.pendingMfaPhoneE164 = null
@@ -1606,15 +1772,18 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 }
                 is AuthResult.Banned -> {
                     appPrefs.pendingMfaPhoneE164 = null
-                    _uiState.update { it.copy(isAuthLoading = false, authError = result.message) }
+                    _moderationNotice.value = ModerationNotice.LoginBanned
+                    _uiState.update { it.copy(isAuthLoading = false, authError = null) }
                 }
                 is AuthResult.Frozen -> {
                     appPrefs.pendingMfaPhoneE164 = null
-                    _uiState.update { it.copy(isAuthLoading = false, authError = result.message) }
+                    _moderationNotice.value = ModerationNotice.LoginBlocked(result.until, result.hours)
+                    _uiState.update { it.copy(isAuthLoading = false, authError = null) }
                 }
                 is AuthResult.Deleted -> {
                     appPrefs.pendingMfaPhoneE164 = null
-                    _uiState.update { it.copy(isAuthLoading = false, authError = result.message) }
+                    _moderationNotice.value = ModerationNotice.LoginDeleted
+                    _uiState.update { it.copy(isAuthLoading = false, authError = null) }
                 }
             }
         }
@@ -1635,6 +1804,11 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         appPrefs.hasCompletedOnboarding = false
         appPrefs.dontShowWelcomeAgain = false
         dailyLimitStore.reset(accountKey)
+        mediaDailyLimitStore.reset(accountKey)
+        profileBoostLimitStore.reset(accountKey)
+        appPrefs.resetPhotoShareWarning(accountKey)
+        markLocalPlanWrite()
+        resolvePlanTier(PlanTier.FREE)
         distanceStore.resetToDefault(accountKey)
         discoverDeckCache.clear(accountKey)
         _discoverState.value = DiscoverUiState()
@@ -1789,6 +1963,59 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    /**
+     * Apply [tier] to local entitlements + mock billing (persisted).
+     * Matches iOS `DiscoverDailyLimit.syncPlanTier`.
+     */
+    private fun resolvePlanTier(tier: PlanTier): PlanTier {
+        planEntitlementsStore.syncPlanTier(tier)
+        MockBillingService.shared.alignWithPlanTier(tier)
+        _currentPlanTier.value = tier
+        return tier
+    }
+
+    private fun markLocalPlanWrite() {
+        localPlanWriteAtMillis = System.currentTimeMillis()
+    }
+
+    private fun isWithinLocalPlanWriteGrace(): Boolean =
+        System.currentTimeMillis() - localPlanWriteAtMillis < LOCAL_PLAN_WRITE_GRACE_MS
+
+    private suspend fun pushPlanTierToFirestore(tier: PlanTier) {
+        repeat(3) { attempt ->
+            val ok = runCatching { authRepository.updatePlanTier(tier) }.isSuccess
+            if (ok) return
+            delay(400L * (attempt + 1))
+        }
+    }
+
+    /**
+     * Resolve entitlements like iOS: local mock billing wins on this device, and is
+     * re-pushed to Firestore so the plan badge stays correct. Adopt a paid cloud plan
+     * only when this device is still Free (first login / cross-device upgrade).
+     * Remote downgrades from iOS still arrive via [observePlanTier].
+     */
+    private fun applyPlanEntitlementsFromUser(profile: SpectRoomUser): SpectRoomUser {
+        val local = planEntitlementsStore.currentPlanTier
+        val remote = profile.planTier
+        val resolved = when {
+            isWithinLocalPlanWriteGrace() -> local
+            local == PlanTier.FREE && remote != PlanTier.FREE -> remote
+            else -> local
+        }
+        resolvePlanTier(resolved)
+        if (resolved != remote || isWithinLocalPlanWriteGrace()) {
+            viewModelScope.launch { pushPlanTierToFirestore(resolved) }
+        }
+        profileBoostLimitStore.syncFromRemote(
+            accountKey = authRepository.accountKey,
+            lastBoostAtMillis = profile.lastProfileBoostAtMillis,
+            boostedUntilMillis = profile.boostedUntilMillis,
+        )
+        ensureAutomaticProfileBoost()
+        return profile.copy(planTier = resolved)
+    }
+
     fun messagingUserId(): String? =
         _uiState.value.currentUser?.firebaseDocumentId?.takeIf { it.isNotBlank() }
             ?: authRepository.currentUid
@@ -1887,6 +2114,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun setLanguage(language: AppLanguage) {
+        _showLanguagePicker.value = false
         if (appPrefs.languageCode == language.code) return
         appPrefs.setLanguage(language)
         _uiState.update { it.copy(languageCode = language.code) }
@@ -1931,7 +2159,11 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             establishChatSoundBaseline()
             runCatching { messageRepository.markMessagesAsRead(partnerId) }
             refreshConversations()
-            val blocked = runCatching { moderationRepository.isBlockedBy(partnerId) }.getOrDefault(false)
+            val blocked = if (AdminSender.isAdmin(partnerId)) {
+                false
+            } else {
+                runCatching { moderationRepository.isBlockedBy(partnerId) }.getOrDefault(false)
+            }
             _uiState.update {
                 it.copy(
                     chatBlockedByPartner = blocked,
@@ -2062,7 +2294,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun sendChatMessage(text: String) {
-        if (_uiState.value.chatBlockedByPartner) return
+        if (_uiState.value.chatBlockedByPartner || AdminSender.isAdmin(_uiState.value.activeChatPartnerId)) return
         val partnerId = _uiState.value.activeChatPartnerId?.trim().orEmpty()
         if (partnerId.isEmpty()) return
         val trimmed = text.trim()
@@ -2077,7 +2309,12 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun sendChatImage(uri: Uri) {
-        if (_uiState.value.chatBlockedByPartner) return
+        if (_uiState.value.chatBlockedByPartner || AdminSender.isAdmin(_uiState.value.activeChatPartnerId)) return
+        val accountKey = authRepository.accountKey
+        if (!mediaDailyLimitStore.canSend(accountKey)) {
+            _showMediaLimitOverlay.value = true
+            return
+        }
         val partnerId = _uiState.value.activeChatPartnerId ?: return
         val currentUserId = messagingUserId() ?: return
         val partnerName = _uiState.value.activeChatPartnerName.orEmpty()
@@ -2112,6 +2349,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 url to messageId
             }
             if (result.isSuccess) {
+                mediaDailyLimitStore.recordSend(accountKey)
                 val (url, messageId) = result.getOrThrow()
                 _socialState.update { state ->
                     val updatedMessages = state.chatMessages.map { message ->
@@ -2502,6 +2740,32 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         )
     }
 
+    /**
+     * Re-reads the on-device daily swipe quota. The store resets at local midnight
+     * (`yyyy-MM-dd`), but in-memory [DiscoverUiState.dailySwipeCount] can stay at 10
+     * overnight until something calls this — leaving the "You've reached your limit"
+     * overlay stuck until a full process restart.
+     */
+    fun refreshDiscoverDailyLimitIfNeeded(reloadDeckIfUnlocked: Boolean = false) {
+        if (_uiState.value.destination != AppDestination.MAIN) return
+        val accountKey = authRepository.accountKey ?: return
+        val wasAtLimit = _discoverState.value.dailySwipeCount >= dailyLimitStore.maxSwipesPerDay() &&
+            !_discoverState.value.isReviewingTodaysPasses
+        val freshCount = dailyLimitStore.currentCount(accountKey)
+        val usedSecondThoughts = dailyLimitStore.hasUsedSecondThoughtsToday(accountKey)
+        _discoverState.update {
+            it.copy(
+                dailySwipeCount = freshCount,
+                hasUsedSecondThoughtsToday = usedSecondThoughts,
+            )
+        }
+        val nowUnderLimit = freshCount < dailyLimitStore.maxSwipesPerDay()
+        if (reloadDeckIfUnlocked && wasAtLimit && nowUnderLimit) {
+            discoverDeckCache.clear(accountKey)
+            loadDiscoverDeck()
+        }
+    }
+
     fun loadDiscoverDeck(ignorePassedFilter: Boolean = false) {
         val currentUser = _uiState.value.currentUser ?: return
         val accountKey = authRepository.accountKey
@@ -2513,6 +2777,14 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                     dailySwipeCount = dailyLimitStore.currentCount(accountKey),
                     hasUsedSecondThoughtsToday = dailyLimitStore.hasUsedSecondThoughtsToday(accountKey),
                     distanceOption = distanceOption,
+                    // Leaving second-thoughts mode if a new day unlocked the quota.
+                    isReviewingTodaysPasses = if (
+                        dailyLimitStore.currentCount(accountKey) < dailyLimitStore.maxSwipesPerDay()
+                    ) {
+                        false
+                    } else {
+                        it.isReviewingTodaysPasses
+                    },
                 )
             }
 
@@ -2679,6 +2951,8 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         private const val PREFETCH_BATCH_SIZE = 20
         private const val CHAT_AUTO_REFRESH_INTERVAL_MS = 10_000L
         private const val PENDING_IMAGE_PREFIX = "pending://"
+        /** Protect Android plan changes from being overwritten by stale Firestore cache. */
+        private const val LOCAL_PLAN_WRITE_GRACE_MS = 15_000L
     }
 
     fun swipe(action: SwipeType) {
@@ -2741,11 +3015,16 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         val profile = state.lastSwipedProfile ?: return
         if (!state.canUndo) return
         val accountKey = authRepository.accountKey
+        if (dailyLimitStore.hasReachedUndoLimit(accountKey)) {
+            _showUndoLimitOverlay.value = true
+            return
+        }
         val count = if (state.lastSwipeCountedTowardLimit) {
             dailyLimitStore.undoLastSwipe(accountKey)
         } else {
             state.dailySwipeCount
         }
+        dailyLimitStore.recordUndo(accountKey)
         _discoverState.update {
             it.copy(
                 currentIndex = (it.currentIndex - 1).coerceAtLeast(0),
@@ -3020,12 +3299,29 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         }
         val moderationJob = viewModelScope.launch {
             authRepository.observeModerationNotices().collect { notice ->
+                if (notice is ModerationNotice.Warning) {
+                    persistAdminWarningMessage(notice)
+                }
                 if (notice != null) {
                     _moderationNotice.value = notice
                 }
             }
         }
-        realtimeJobs = listOf(matchesJob, matchCountJob, messagesJob, moderationJob)
+        val planTierJob = viewModelScope.launch {
+            authRepository.observePlanTier().collect { remoteTier ->
+                if (remoteTier == _currentPlanTier.value) return@collect
+                // Don't let a stale Free snapshot undo a plan change just made on Android.
+                if (isWithinLocalPlanWriteGrace()) return@collect
+                resolvePlanTier(remoteTier)
+                _uiState.update { state ->
+                    val user = state.currentUser ?: return@update state
+                    state.copy(currentUser = user.copy(planTier = remoteTier))
+                }
+                refreshDiscoverStateAfterBillingChange()
+                ensureAutomaticProfileBoost()
+            }
+        }
+        realtimeJobs = listOf(matchesJob, matchCountJob, messagesJob, moderationJob, planTierJob)
     }
 
     private fun stopRealtime() {
@@ -3037,7 +3333,6 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
     private suspend fun refreshSession() {
         when (val gate = authRepository.evaluateAccessGate()) {
             is AccessGate.Banned -> {
-                authRepository.signOut()
                 _moderationNotice.value = ModerationNotice.LoginBanned
                 _uiState.update {
                     it.copy(
@@ -3052,8 +3347,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 return
             }
             is AccessGate.Frozen -> {
-                authRepository.signOut()
-                _moderationNotice.value = ModerationNotice.LoginBlocked(gate.until)
+                _moderationNotice.value = ModerationNotice.LoginBlocked(gate.until, gate.hours)
                 _uiState.update {
                     it.copy(
                         isAuthenticated = false,
@@ -3067,7 +3361,6 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 return
             }
             is AccessGate.Deleted -> {
-                authRepository.signOut()
                 _moderationNotice.value = ModerationNotice.LoginDeleted
                 _uiState.update {
                     it.copy(
@@ -3084,12 +3377,14 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             AccessGate.Allowed -> Unit
         }
 
-        val profile = authRepository.fetchCurrentUserProfile()
-            ?: SpectRoomUser(
-                name = authRepository.currentEmail.orEmpty().substringBefore("@"),
-                email = authRepository.currentEmail.orEmpty(),
-                firebaseDocumentId = authRepository.currentUid,
-            )
+        val profile = applyPlanEntitlementsFromUser(
+            authRepository.fetchCurrentUserProfile()
+                ?: SpectRoomUser(
+                    name = authRepository.currentEmail.orEmpty().substringBefore("@"),
+                    email = authRepository.currentEmail.orEmpty(),
+                    firebaseDocumentId = authRepository.currentUid,
+                ),
+        )
         val complete = ProfileCompletion.evaluate(profile) == UserProfileStatus.COMPLETE
         val needsMfa = !mfaAuthRepository.isMfaEnrolledOrBypassed()
         // iOS: MFA enrollment before mandatory profile.
@@ -3131,8 +3426,22 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             startRealtime()
             syncFcmToken()
             setOnline(true)
+            ensureAutomaticProfileBoost()
             _moderationNotice.value = authRepository.fetchPendingModerationNotice()
+            persistAdminWarningMessage(_moderationNotice.value)
         }
+    }
+
+    private suspend fun persistAdminWarningMessage(notice: ModerationNotice?) {
+        val warning = notice as? ModerationNotice.Warning ?: return
+        runCatching {
+            messageRepository.persistAdminWarningMessage(
+                message = warning.message,
+                noticeId = warning.noticeId,
+                createdAtSeconds = warning.createdAtSeconds,
+            )
+        }
+        refreshConversations()
     }
 
     private fun syncFcmToken() {

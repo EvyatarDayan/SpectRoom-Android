@@ -169,6 +169,8 @@ fun VoiceRecordingPreviewSheet(
     durationSeconds: Double,
     localPath: String?,
     isSending: Boolean,
+    mediaRemaining: Int? = null,
+    onUpgrade: (() -> Unit)? = null,
     onSend: () -> Unit,
     onDiscard: () -> Unit,
 ) {
@@ -197,47 +199,58 @@ fun VoiceRecordingPreviewSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 180.dp, max = 230.dp)
                 .padding(horizontal = 20.dp)
                 .padding(top = 12.dp, bottom = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text(
-                text = stringResource(R.string.messages_voice_ready),
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 17.sp,
-                color = colors.text,
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(64.dp),
-                contentAlignment = Alignment.CenterStart,
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                VoiceMessagePlayer(
-                    audioUrl = null,
-                    localFile = localPath?.let { File(it) }?.takeIf { it.exists() },
-                    displayDurationSeconds = durationSeconds,
-                    isOutgoing = true,
-                    modifier = Modifier.fillMaxWidth(),
+                Text(
+                    text = stringResource(R.string.messages_voice_ready),
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 17.sp,
+                    color = colors.text,
+                    maxLines = 1,
                 )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(64.dp),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    VoiceMessagePlayer(
+                        audioUrl = null,
+                        localFile = localPath?.let { File(it) }?.takeIf { it.exists() },
+                        displayDurationSeconds = durationSeconds,
+                        isOutgoing = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
-            Spacer(modifier = Modifier.height(20.dp))
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                OutlinedButton(
+                Button(
                     onClick = onDiscard,
                     enabled = !isSending,
                     modifier = Modifier
                         .weight(1f)
                         .height(48.dp),
                     shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colors.secondaryText.copy(alpha = 0.12f),
+                        contentColor = LikeRed,
+                        disabledContainerColor = colors.secondaryText.copy(alpha = 0.08f),
+                        disabledContentColor = LikeRed.copy(alpha = 0.45f),
+                    ),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
                 ) {
                     Text(
                         text = stringResource(R.string.common_delete),
-                        color = LikeRed,
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
@@ -272,6 +285,14 @@ fun VoiceRecordingPreviewSheet(
                         }
                     }
                 }
+            }
+
+            if (mediaRemaining != null) {
+                MediaRemainingUpgradeFooter(
+                    remainingCount = mediaRemaining,
+                    enabled = !isSending,
+                    onUpgrade = onUpgrade,
+                )
             }
         }
     }

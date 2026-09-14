@@ -15,11 +15,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -44,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.spectroom.R
 import com.example.spectroom.data.model.SupportTopic
+import com.example.spectroom.ui.theme.LikeGreen
 import com.example.spectroom.ui.theme.LikeRed
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
 import com.example.spectroom.ui.theme.TabSelected
@@ -236,27 +239,46 @@ fun HelpSupportSheet(
                         onSend(selectedTopic, trimmed)
                     },
                     enabled = !isSending && !sendSucceeded,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (sendSucceeded) Color(0xFF2E7D32) else TabSelected,
+                        containerColor = if (sendSucceeded) LikeGreen else TabSelected,
+                        disabledContainerColor = when {
+                            sendSucceeded -> LikeGreen
+                            isSending -> Color.Gray
+                            else -> TabSelected.copy(alpha = 0.45f)
+                        },
+                        contentColor = Color.White,
+                        disabledContentColor = Color.White,
                     ),
                 ) {
-                    if (isSending) {
-                        CircularProgressIndicator(
+                    when {
+                        isSending -> CircularProgressIndicator(
                             color = Color.White,
                             strokeWidth = 2.dp,
-                            modifier = Modifier.height(22.dp),
+                            modifier = Modifier.size(22.dp),
                         )
-                    } else {
-                        Text(
-                            text = stringResource(
-                                if (sendSucceeded) {
-                                    R.string.support_button_sent
-                                } else {
-                                    R.string.support_button_send
-                                },
-                            ),
+                        sendSucceeded -> Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Check,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp),
+                            )
+                            Spacer(modifier = Modifier.padding(start = 8.dp))
+                            Text(
+                                text = stringResource(R.string.support_button_sent),
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 16.sp,
+                            )
+                        }
+                        else -> Text(
+                            text = stringResource(R.string.support_button_send),
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 16.sp,
                         )

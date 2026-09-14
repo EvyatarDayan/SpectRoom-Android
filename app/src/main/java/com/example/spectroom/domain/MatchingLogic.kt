@@ -342,10 +342,22 @@ object DiscoverEligibility {
     }
 
     fun formatDistanceKm(km: Double, forMatches: Boolean = false): String {
-        return when {
-            forMatches && km < 1 -> "Nearby"
-            km < 1 -> "< 1 km"
-            else -> "${km.toInt()} km"
+        val amount = when {
+            km < 1.0 -> if (forMatches) "1" else null
+            else -> {
+                val rounded = kotlin.math.round(km * 10.0) / 10.0
+                if (rounded == kotlin.math.floor(rounded)) {
+                    "${rounded.toInt()}"
+                } else {
+                    String.format(java.util.Locale.US, "%.1f", rounded)
+                }
+            }
+        }
+        return if (forMatches) {
+            "$amount km away"
+        } else when {
+            amount == null -> "< 1 km"
+            else -> "$amount km"
         }
     }
 

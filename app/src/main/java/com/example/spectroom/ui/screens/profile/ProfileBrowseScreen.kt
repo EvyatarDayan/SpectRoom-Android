@@ -11,6 +11,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.example.spectroom.R
@@ -18,6 +19,7 @@ import com.example.spectroom.data.model.IdealFirstDateOption
 import com.example.spectroom.data.model.LifestyleOption
 import com.example.spectroom.data.model.BodyTypeOption
 import com.example.spectroom.data.model.LookingForOption
+import com.example.spectroom.data.model.PlanTier
 import com.example.spectroom.data.model.SensoryPreferenceOption
 import com.example.spectroom.data.model.SpectRoomUser
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
@@ -63,6 +65,7 @@ fun ProfileBrowseScreen(
 
         ProfileMainPhotoCard(
             imageUrl = user?.profilePhotoURL,
+            planBadge = user?.planTier ?: PlanTier.FREE,
             onClick = if (photos.isNotEmpty()) {
                 { onOpenPhotos(photos, 0) }
             } else {
@@ -238,7 +241,12 @@ private fun ProfileAboutMeContent(user: SpectRoomUser?) {
         Spacer(modifier = Modifier.height(16.dp))
         ProfileSubsectionTitle(stringResource(R.string.profile_my_sensory_preferences))
         Spacer(modifier = Modifier.height(8.dp))
-        ProfileBodyText(text = SensoryPreferenceOption.formattedTitles(user.sensoryPreferences))
+        ProfileBodyText(
+            text = SensoryPreferenceOption.formattedTitles(
+                user.sensoryPreferences,
+                LocalContext.current,
+            ),
+        )
     }
 }
 

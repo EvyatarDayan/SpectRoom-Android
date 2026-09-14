@@ -36,12 +36,15 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.spectroom.NotificationDeepLink
 import com.example.spectroom.R
+import com.example.spectroom.data.model.AdminSender
 import com.example.spectroom.data.model.DiscoverDistanceOption
 import com.example.spectroom.data.model.EnergyLevel
+import com.example.spectroom.data.model.PlanTier
 import com.example.spectroom.data.model.ProfileCard
 import com.example.spectroom.repository.ModerationRepository
 import com.example.spectroom.ui.components.AuthFlowPreferenceBar
 import com.example.spectroom.ui.components.PhotoViewerDialog
+import com.example.spectroom.ui.components.PlanLimitOverlay
 import com.example.spectroom.ui.components.SpectRoomBottomBar
 import com.example.spectroom.ui.components.TabBarMainContentInset
 import com.example.spectroom.ui.components.SystemWarningOverlay
@@ -61,10 +64,9 @@ import com.example.spectroom.ui.screens.messages.NewMessageComposeSheet
 import com.example.spectroom.ui.screens.messages.NewMessageNotificationModal
 import com.example.spectroom.ui.screens.onboarding.OnboardingScreen
 import com.example.spectroom.ui.screens.profile.AddressSearchSheet
-import com.example.spectroom.ui.screens.profile.DateOfBirthPickerRequest
-import com.example.spectroom.ui.screens.profile.ProfileDateOfBirthPickerHost
 import com.example.spectroom.ui.screens.profile.ProfileEditScreen
 import com.example.spectroom.ui.screens.settings.AboutSheet
+import com.example.spectroom.ui.screens.settings.AccountBillingSheet
 import com.example.spectroom.ui.screens.settings.HelpSupportSheet
 import com.example.spectroom.ui.screens.settings.LanguagePickerSheet
 import com.example.spectroom.ui.screens.settings.BlockedUsersSheet
@@ -101,6 +103,8 @@ fun SpectRoomApp(
     val moderationNotice by viewModel.moderationNotice.collectAsStateWithLifecycle()
     val exportShareUri by viewModel.exportShareUri.collectAsStateWithLifecycle()
     val showHelpSupport by viewModel.showHelpSupport.collectAsStateWithLifecycle()
+    val showAccountBilling by viewModel.showAccountBilling.collectAsStateWithLifecycle()
+    val currentPlanTier by viewModel.currentPlanTierState.collectAsStateWithLifecycle()
     val helpLockedTopic by viewModel.helpLockedTopic.collectAsStateWithLifecycle()
     val isSendingSupport by viewModel.isSendingSupport.collectAsStateWithLifecycle()
     val supportSendSucceeded by viewModel.supportSendSucceeded.collectAsStateWithLifecycle()
@@ -123,6 +127,7 @@ fun SpectRoomApp(
         val share = Intent(Intent.ACTION_SEND).apply {
             type = "application/pdf"
             putExtra(Intent.EXTRA_STREAM, uri)
+            clipData = android.content.ClipData.newUri(context.contentResolver, "pdf", uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         context.startActivity(Intent.createChooser(share, null))
@@ -153,22 +158,6 @@ fun SpectRoomApp(
         pickGalleryPhoto.launch(imagePickRequest)
     }
 
-    var dateOfBirthPickerRequest by remember { mutableStateOf<DateOfBirthPickerRequest?>(null) }
-    val requestDateOfBirthPick: (Long, (Long) -> Unit, () -> Unit) -> Unit =
-        { initialMillis, onSelected, onDismissed ->
-            dateOfBirthPickerRequest = DateOfBirthPickerRequest(
-                initialDateMillis = initialMillis,
-                onSelected = onSelected,
-                onDismissed = onDismissed,
-            )
-        }
-
-    ProfileDateOfBirthPickerHost(
-        request = dateOfBirthPickerRequest,
-        activity = activity,
-        onDismiss = { dateOfBirthPickerRequest = null },
-    )
-
     fun requestNotificationsIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -185,7 +174,11 @@ fun SpectRoomApp(
     DisposableEffect(lifecycleOwner, uiState.isAuthenticated) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START -> if (uiState.isAuthenticated) viewModel.setOnline(true)
+                Lifecycle.Event.ON_START -> if (uiState.isAuthenticated) {
+                    viewModel.setOnline(true)
+                    viewModel.refreshCurrentUserProfile()
+                    viewModel.ensureAutomaticProfileBoost()
+                }
                 Lifecycle.Event.ON_STOP -> if (uiState.isAuthenticated) viewModel.setOnline(false)
                 else -> Unit
             }
@@ -309,6 +302,7 @@ fun SpectRoomApp(
             AppDestination.MANDATORY_PROFILE -> ProfileEditScreen(
                 user = uiState.currentUser,
                 mandatory = true,
+                planBadge = currentPlanTier,
                 isUploadingPhoto = socialState.isUploadingPhoto,
                 isSaving = uiState.isSavingProfile,
                 saveError = uiState.profileSaveError,
@@ -319,7 +313,6 @@ fun SpectRoomApp(
                 onRequestGalleryPhotoPick = requestGalleryPhotoPick,
                 onDeleteGalleryPhoto = viewModel::deleteGalleryPhoto,
                 onSearchAddress = viewModel::showAddressSearch,
-                onRequestDateOfBirthPick = requestDateOfBirthPick,
             )
             AppDestination.MAIN -> {
                 val inChat = uiState.activeChatPartnerId != null
@@ -336,15 +329,17 @@ fun SpectRoomApp(
                             currentEnergyLevel = uiState.currentUser?.energyLevel
                                 ?: EnergyLevel.FULLY_SOCIAL,
                             profileIncomplete = !viewModel.isCurrentProfileComplete(),
+                            maxSwipesPerDay = currentPlanTier.dailyDiscoverSwipeLimit,
+                            planTier = currentPlanTier,
                             onSwipe = viewModel::swipe,
                             onProgrammaticSwipe = viewModel::requestProgrammaticSwipe,
                             onProgrammaticSwipeComplete = viewModel::onProgrammaticSwipeComplete,
                             onUndo = viewModel::undoLastSwipe,
-                            onSecondThoughts = viewModel::useSecondThoughts,
                             onOpenProfile = viewModel::openProfileDetail,
                             onUpdateEnergyLevel = viewModel::updateEnergyLevel,
                             onSetDistance = viewModel::setDistanceOption,
                             onFinishProfile = viewModel::goToProfileTab,
+                            onUpgradePlans = viewModel::showAccountBilling,
                         )
                     },
                     matchesContent = {
@@ -379,7 +374,9 @@ fun SpectRoomApp(
                                 isSending = socialState.isSendingMessage,
                                 isRecording = uiState.isRecordingVoice,
                                 recordingDurationSeconds = uiState.recordingDurationSeconds,
-                                composerLocked = uiState.chatBlockedByPartner,
+                                composerLocked = uiState.chatBlockedByPartner ||
+                                    AdminSender.isAdmin(uiState.activeChatPartnerId),
+                                isAdminThread = AdminSender.isAdmin(uiState.activeChatPartnerId),
                                 hasMoreOlder = socialState.chatHasMoreOlder,
                                 isLoadingOlder = socialState.isLoadingOlderChat,
                                 hasPendingVoicePreview = uiState.hasPendingVoicePreview,
@@ -387,11 +384,17 @@ fun SpectRoomApp(
                                 pendingVoicePath = uiState.pendingVoicePreviewPath,
                                 imageLocalPreviews = socialState.chatImageLocalPreviews,
                                 uploadingImageContentKey = socialState.uploadingImageContentKey,
-                                shouldShowPhotoWarning = viewModel.shouldShowPhotoShareWarning(),
-                                onPhotoWarningContinue = viewModel::setSkipPhotoShareWarning,
+                                onRegisterPhotoShareMediaTap = viewModel::registerPhotoShareMediaTapAndShouldShow,
                                 onBack = viewModel::closeChat,
                                 onSend = viewModel::sendChatMessage,
                                 onSendImage = viewModel::sendChatImage,
+                                canSendMedia = viewModel.canSendChatMedia(),
+                                mediaRemaining = viewModel.mediaRemainingToday(),
+                                onMediaLimitReached = viewModel::showMediaLimitOverlay,
+                                onViewPlansFromMedia = {
+                                    viewModel.hideMediaLimitOverlay()
+                                    viewModel.showAccountBilling()
+                                },
                                 onStartRecording = viewModel::startVoiceRecording,
                                 onStopRecordingAndSend = viewModel::stopVoiceRecordingForPreview,
                                 onCancelRecording = viewModel::cancelVoiceRecording,
@@ -494,6 +497,7 @@ fun SpectRoomApp(
                         key(formResetKey) {
                             ProfileEditScreen(
                                 user = uiState.currentUser,
+                                planBadge = currentPlanTier,
                                 isUploadingPhoto = socialState.isUploadingPhoto,
                                 isSaving = uiState.isSavingProfile,
                                 saveError = uiState.profileSaveError,
@@ -509,7 +513,6 @@ fun SpectRoomApp(
                                 onRequestGalleryPhotoPick = requestGalleryPhotoPick,
                                 onDeleteGalleryPhoto = viewModel::deleteGalleryPhoto,
                                 onSearchAddress = viewModel::showAddressSearch,
-                                onRequestDateOfBirthPick = requestDateOfBirthPick,
                             )
                         }
                     },
@@ -532,6 +535,7 @@ fun SpectRoomApp(
                             onHelp = { viewModel.showHelpSupport() },
                             onAbout = { viewModel.showInfo(AppStateViewModel.InfoSheetType.ABOUT) },
                             onExportMessages = viewModel::exportMessages,
+                            onAccountBilling = viewModel::showAccountBilling,
                             isAdmin = uiState.isAdmin,
                             onAdmin = viewModel::showAdminConsole,
                             onDeleteAccount = viewModel::showDeleteAccount,
@@ -596,6 +600,7 @@ fun SpectRoomApp(
             UserProfileModal(
                 profile = profile,
                 matchBreakdown = viewModel.matchBreakdownFor(profile),
+                showsFullMatchBreakdown = viewModel.showsFullMatchBreakdown(),
                 onDismiss = viewModel::closeProfileDetail,
                 onMessage = {
                     viewModel.closeProfileDetail()
@@ -608,6 +613,10 @@ fun SpectRoomApp(
                 },
                 onOpenPhotos = viewModel::openPhotoViewer,
                 onRefresh = viewModel::refreshViewingProfile,
+                onUpgradePlans = {
+                    viewModel.closeProfileDetail()
+                    viewModel.showAccountBilling()
+                },
                 blockConfirmationFirstName = blockFirstName,
                 onDismissBlockConfirmation = viewModel::dismissBlockConfirmation,
                 onConfirmBlockOnly = viewModel::confirmBlockOnly,
@@ -681,6 +690,46 @@ fun SpectRoomApp(
                 errorMessage = supportError,
                 onSend = viewModel::submitSupportTicket,
                 onDismiss = viewModel::hideHelpSupport,
+            )
+        }
+
+        if (showAccountBilling) {
+            AccountBillingSheet(
+                onDismiss = viewModel::hideAccountBilling,
+                onPlanChanged = viewModel::onBillingPlanChanged,
+                accountEmail = uiState.currentUser?.email.orEmpty(),
+                seedPlanTier = currentPlanTier,
+                onShareExportedPdf = viewModel::shareExportedPdf,
+            )
+        }
+
+        val showMediaLimitOverlay by viewModel.showMediaLimitOverlay.collectAsStateWithLifecycle()
+        if (showMediaLimitOverlay) {
+            PlanLimitOverlay(
+                title = stringResource(R.string.messages_media_limit_title),
+                message = stringResource(viewModel.mediaLimitMessageRes()),
+                showsPlansButton = currentPlanTier != PlanTier.PREMIUM,
+                onDismiss = viewModel::hideMediaLimitOverlay,
+                onViewPlans = {
+                    viewModel.hideMediaLimitOverlay()
+                    viewModel.showAccountBilling()
+                },
+            )
+        }
+
+        val showUndoLimitOverlay by viewModel.showUndoLimitOverlay.collectAsStateWithLifecycle()
+        if (showUndoLimitOverlay) {
+            PlanLimitOverlay(
+                title = stringResource(R.string.search_undo_limit_title),
+                message = stringResource(R.string.search_undo_limit_message),
+                showsPlansButton = currentPlanTier != PlanTier.PREMIUM,
+                dismissButtonTitle = stringResource(R.string.search_undo_limit_not_now),
+                plansButtonTitle = stringResource(R.string.search_undo_limit_view_plans),
+                onDismiss = viewModel::hideUndoLimitOverlay,
+                onViewPlans = {
+                    viewModel.hideUndoLimitOverlay()
+                    viewModel.showAccountBilling()
+                },
             )
         }
 
@@ -788,7 +837,14 @@ private fun MainShell(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(bottom = if (showBottomBar) TabBarMainContentInset else 0.dp),
+                // Settings applies its own bottom inset (includes nav bars) so the
+                // list clears the menu with a visible gap.
+                .padding(
+                    bottom = when {
+                        !showBottomBar || selectedTab == 4 -> 0.dp
+                        else -> TabBarMainContentInset
+                    },
+                ),
         ) {
             when (selectedTab) {
                 0 -> messagesContent()

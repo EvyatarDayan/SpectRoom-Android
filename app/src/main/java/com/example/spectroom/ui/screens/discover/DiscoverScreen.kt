@@ -70,22 +70,24 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil3.compose.SubcomposeAsyncImage
 import com.example.spectroom.R
-import com.example.spectroom.data.local.DiscoverDailyLimitStore
 import com.example.spectroom.data.model.DiscoverDistanceOption
 import com.example.spectroom.data.model.EnergyLevel
+import com.example.spectroom.data.model.PlanTier
 import com.example.spectroom.data.model.ProfileCard
 import com.example.spectroom.data.model.SwipeType
-import com.example.spectroom.ui.components.TabBarBodyHeight
 import com.example.spectroom.ui.theme.DistanceAccent
 import com.example.spectroom.ui.theme.EnergyLow
 import com.example.spectroom.ui.theme.LikeGreen
@@ -135,7 +137,7 @@ private fun pickerPanelExitTransition() =
             transformOrigin = PickerPanelTopOrigin,
             animationSpec = PickerPanelCloseSpring,
         )
-private val ActionRowBottomPadding = TabBarBodyHeight
+private val ActionRowBottomPadding = 80.dp
 private val CardAreaBottomPadding = 108.dp
 private val SwipeStampYOffset = 52.dp
 
@@ -144,18 +146,20 @@ fun DiscoverScreen(
     state: DiscoverUiState,
     currentEnergyLevel: Int = EnergyLevel.FULLY_SOCIAL,
     profileIncomplete: Boolean = false,
+    maxSwipesPerDay: Int = 10,
+    planTier: PlanTier = PlanTier.FREE,
     onSwipe: (SwipeType) -> Unit,
     onProgrammaticSwipe: (SwipeType) -> Unit = {},
     onProgrammaticSwipeComplete: (SwipeType) -> Unit = {},
     onUndo: () -> Unit,
-    onSecondThoughts: () -> Unit,
     onOpenProfile: (ProfileCard) -> Unit = {},
     onUpdateEnergyLevel: (Int) -> Unit = {},
     onSetDistance: (DiscoverDistanceOption) -> Unit = {},
     onFinishProfile: () -> Unit = {},
+    onUpgradePlans: () -> Unit = {},
 ) {
     val colors = LocalSpectRoomColors.current
-    val reachedLimit = state.dailySwipeCount >= DiscoverDailyLimitStore.MAX_SWIPES_PER_DAY &&
+    val reachedLimit = state.dailySwipeCount >= maxSwipesPerDay &&
         !state.isReviewingTodaysPasses
     val frozenCardIndex = when {
         state.profiles.isEmpty() -> -1
@@ -218,11 +222,10 @@ fun DiscoverScreen(
                             isTopCard = depth == 0,
                             programmaticSwipe = if (depth == 0) state.programmaticSwipe else null,
                             isDailyLimitReached = reachedLimit,
-                            canUseSecondThoughts = !state.hasUsedSecondThoughtsToday,
-                            isLoadingSecondThoughts = state.isLoadingSecondThoughts,
-                            secondThoughtsError = state.secondThoughtsError,
-                            onSecondThoughts = onSecondThoughts,
+                            maxSwipesPerDay = maxSwipesPerDay,
+                            planTier = planTier,
                             onShowDailyLimitWhy = { showingDailyLimitWhy = true },
+                            onUpgradePlans = onUpgradePlans,
                             onSwiped = onSwipe,
                             onProgrammaticSwipeComplete = onProgrammaticSwipeComplete,
                             onOpen = {
@@ -246,23 +249,23 @@ fun DiscoverScreen(
                     icon = Icons.Filled.Close,
                     tint = PassRed,
                     onClick = { onProgrammaticSwipe(SwipeType.PASS) },
-                    size = 76.dp,
-                    iconSize = 30.dp,
+                    size = 84.dp,
+                    iconSize = 34.dp,
                 )
                 ActionCircle(
                     icon = Icons.Filled.Replay,
                     tint = colors.text,
                     enabled = state.canUndo,
                     onClick = onUndo,
-                    size = 52.dp,
-                    iconSize = 18.dp,
+                    size = 58.dp,
+                    iconSize = 20.dp,
                 )
                 ActionCircle(
                     icon = Icons.Filled.Favorite,
                     tint = LikeGreen,
                     onClick = { onProgrammaticSwipe(SwipeType.LIKE) },
-                    size = 76.dp,
-                    iconSize = 30.dp,
+                    size = 84.dp,
+                    iconSize = 34.dp,
                 )
             }
         }
@@ -836,11 +839,10 @@ private fun SwipeableProfileCard(
     isTopCard: Boolean = true,
     programmaticSwipe: SwipeType? = null,
     isDailyLimitReached: Boolean = false,
-    canUseSecondThoughts: Boolean = false,
-    isLoadingSecondThoughts: Boolean = false,
-    secondThoughtsError: String? = null,
-    onSecondThoughts: () -> Unit = {},
+    maxSwipesPerDay: Int = 10,
+    planTier: PlanTier = PlanTier.FREE,
     onShowDailyLimitWhy: () -> Unit = {},
+    onUpgradePlans: () -> Unit = {},
     onSwiped: (SwipeType) -> Unit,
     onProgrammaticSwipeComplete: (SwipeType) -> Unit = {},
     onOpen: () -> Unit,
@@ -969,11 +971,10 @@ private fun SwipeableProfileCard(
 
         if (isDailyLimitReached && isTopCard) {
             DailyLimitOverlay(
-                canUseSecondThoughts = canUseSecondThoughts,
-                isLoadingSecondThoughts = isLoadingSecondThoughts,
-                errorMessage = secondThoughtsError,
-                onSecondThoughts = onSecondThoughts,
+                maxSwipesPerDay = maxSwipesPerDay,
+                planTier = planTier,
                 onShowWhy = onShowDailyLimitWhy,
+                onUpgradePlans = onUpgradePlans,
             )
         }
 
@@ -1008,75 +1009,76 @@ private fun SwipeableProfileCard(
 
 @Composable
 private fun DailyLimitOverlay(
-    canUseSecondThoughts: Boolean,
-    isLoadingSecondThoughts: Boolean,
-    errorMessage: String?,
-    onSecondThoughts: () -> Unit,
+    maxSwipesPerDay: Int,
+    planTier: PlanTier,
     onShowWhy: () -> Unit,
+    onUpgradePlans: () -> Unit,
 ) {
     val whyInteractionSource = remember { MutableInteractionSource() }
-    val secondThoughtsInteractionSource = remember { MutableInteractionSource() }
+    val upgradeInteractionSource = remember { MutableInteractionSource() }
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 28.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
     ) {
-        Text(
-            text = stringResource(R.string.discover_daily_limit_title),
-            fontWeight = FontWeight.Bold,
-            fontSize = 22.sp,
-            color = Color.White,
-            textAlign = TextAlign.Center,
-        )
-        if (!errorMessage.isNullOrBlank()) {
-            Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.weight(1f))
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
             Text(
-                text = errorMessage,
-                color = Color.White.copy(alpha = 0.92f),
-                fontSize = 13.sp,
+                text = stringResource(R.string.search_daily_limit_reached, maxSwipesPerDay),
+                fontWeight = FontWeight.Bold,
+                fontSize = 22.sp,
+                color = Color.White,
                 textAlign = TextAlign.Center,
             )
-        }
-        if (canUseSecondThoughts) {
-            Spacer(modifier = Modifier.height(18.dp))
-            if (isLoadingSecondThoughts) {
-                CircularProgressIndicator(
-                    color = Color.White,
-                    strokeWidth = 2.dp,
-                    modifier = Modifier.size(22.dp),
+            if (planTier == PlanTier.PREMIUM) {
+                Text(
+                    text = stringResource(R.string.search_daily_limit_premium_tomorrow),
+                    color = Color.White.copy(alpha = 0.92f),
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 15.sp,
+                    textAlign = TextAlign.Center,
                 )
             } else {
                 Text(
-                    text = stringResource(R.string.discover_second_thoughts),
-                    color = Color.White,
-                    fontWeight = FontWeight.SemiBold,
+                    text = buildAnnotatedString {
+                        withStyle(SpanStyle(color = TabSelected, fontWeight = FontWeight.SemiBold)) {
+                            append(stringResource(R.string.search_daily_limit_upgrade_prefix))
+                        }
+                        withStyle(SpanStyle(color = Color.White, fontWeight = FontWeight.SemiBold)) {
+                            append(stringResource(R.string.search_daily_limit_upgrade_suffix))
+                        }
+                    },
                     fontSize = 15.sp,
                     textAlign = TextAlign.Center,
                     modifier = Modifier
                         .clickable(
-                            interactionSource = secondThoughtsInteractionSource,
+                            interactionSource = upgradeInteractionSource,
                             indication = null,
-                            onClick = onSecondThoughts,
+                            onClick = onUpgradePlans,
                         )
-                        .padding(horizontal = 24.dp, vertical = 4.dp),
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
                 )
             }
         }
-        Spacer(modifier = Modifier.height(if (canUseSecondThoughts) 2.dp else 0.dp))
-        Spacer(modifier = Modifier.height(18.dp))
+        Spacer(modifier = Modifier.weight(1f))
         Text(
-            text = stringResource(R.string.discover_daily_limit_why),
+            text = stringResource(R.string.search_daily_limit_why),
             color = Color.White.copy(alpha = 0.92f),
             fontWeight = FontWeight.SemiBold,
             fontSize = 14.sp,
             textDecoration = TextDecoration.Underline,
-            modifier = Modifier.clickable(
-                interactionSource = whyInteractionSource,
-                indication = null,
-                onClick = onShowWhy,
-            ),
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .padding(bottom = 28.dp)
+                .clickable(
+                    interactionSource = whyInteractionSource,
+                    indication = null,
+                    onClick = onShowWhy,
+                ),
         )
     }
 }

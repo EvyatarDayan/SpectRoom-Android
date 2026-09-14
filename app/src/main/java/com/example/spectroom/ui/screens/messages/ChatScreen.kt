@@ -86,6 +86,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import coil3.compose.AsyncImage
 import com.example.spectroom.R
+import com.example.spectroom.data.model.AdminSender
 import com.example.spectroom.data.model.MessageDisplay
 import com.example.spectroom.data.model.MessageType
 import com.example.spectroom.ui.theme.ChatBubbleText
@@ -113,6 +114,7 @@ fun ChatScreen(
     isRecording: Boolean,
     recordingDurationSeconds: Double = 0.0,
     composerLocked: Boolean = false,
+    isAdminThread: Boolean = false,
     hasMoreOlder: Boolean = false,
     isLoadingOlder: Boolean = false,
     hasPendingVoicePreview: Boolean = false,
@@ -120,11 +122,14 @@ fun ChatScreen(
     pendingVoicePath: String? = null,
     imageLocalPreviews: Map<String, String> = emptyMap(),
     uploadingImageContentKey: String? = null,
-    shouldShowPhotoWarning: Boolean = true,
-    onPhotoWarningContinue: (dontShowAgain: Boolean) -> Unit = {},
+    onRegisterPhotoShareMediaTap: () -> Boolean = { false },
     onBack: () -> Unit,
     onSend: (String) -> Unit,
     onSendImage: (Uri) -> Unit = {},
+    canSendMedia: Boolean = true,
+    mediaRemaining: Int = 0,
+    onMediaLimitReached: () -> Unit = {},
+    onViewPlansFromMedia: () -> Unit = {},
     onStartRecording: () -> Unit = {},
     onStopRecordingAndSend: () -> Unit = {},
     onCancelRecording: () -> Unit = {},
@@ -153,7 +158,7 @@ fun ChatScreen(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted -> if (granted) onStartRecording() }
     var showPhotoWarning by remember { mutableStateOf(false) }
-    var photoWarningActive by remember { mutableStateOf(shouldShowPhotoWarning) }
+    var pendingMediaAfterWarning by remember { mutableStateOf<PendingMediaAfterWarning?>(null) }
     var showMicLongPressTip by remember { mutableStateOf(false) }
     var expandedLongMessageIds by remember { mutableStateOf(setOf<String>()) }
     var pinToBottomOnOpen by remember(partnerName) { mutableStateOf(true) }
@@ -165,20 +170,40 @@ fun ChatScreen(
         return loadingOffset + messages.size
     }
 
-    fun requestSendImage() {
-        if (photoWarningActive) {
-            showPhotoWarning = true
-        } else {
-            imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-        }
-    }
-
-    fun requestStartRecording() {
+    fun startRecordingAfterWarning() {
         val granted = ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.RECORD_AUDIO,
         ) == PackageManager.PERMISSION_GRANTED
         if (granted) onStartRecording() else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    fun requestSendImage() {
+        if (!canSendMedia) {
+            onMediaLimitReached()
+            return
+        }
+        if (onRegisterPhotoShareMediaTap()) {
+            pendingMediaAfterWarning = PendingMediaAfterWarning.Photo
+            showPhotoWarning = true
+        } else {
+            imagePicker.launch(
+                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+            )
+        }
+    }
+
+    fun requestStartRecording() {
+        if (!canSendMedia) {
+            onMediaLimitReached()
+            return
+        }
+        if (onRegisterPhotoShareMediaTap()) {
+            pendingMediaAfterWarning = PendingMediaAfterWarning.Voice
+            showPhotoWarning = true
+            return
+        }
+        startRecordingAfterWarning()
     }
 
     val isAtBottom = remember(listState) {
@@ -250,6 +275,7 @@ fun ChatScreen(
             partnerName = partnerName,
             partnerPhotoUrl = partnerPhotoUrl,
             composerLocked = composerLocked,
+            isAdminThread = isAdminThread,
             onBack = onBack,
             onOpenPartnerProfile = onOpenPartnerProfile,
             onQuickMessage = { showQuickMessages = true },
@@ -321,7 +347,13 @@ fun ChatScreen(
 
         if (composerLocked) {
             Text(
-                text = stringResource(R.string.messages_composer_blocked),
+                text = stringResource(
+                    if (isAdminThread) {
+                        R.string.messages_composer_admin
+                    } else {
+                        R.string.messages_composer_blocked
+                    },
+                ),
                 color = colors.secondaryText,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -349,15 +381,22 @@ fun ChatScreen(
 
     if (showPhotoWarning) {
         PhotoShareWarningOverlay(
-            onContinue = { dontShowAgain ->
+            onContinue = {
+                val action = pendingMediaAfterWarning
+                pendingMediaAfterWarning = null
                 showPhotoWarning = false
-                onPhotoWarningContinue(dontShowAgain)
-                if (dontShowAgain) photoWarningActive = false
-                imagePicker.launch(
-                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                )
+                when (action) {
+                    PendingMediaAfterWarning.Photo -> imagePicker.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                    )
+                    PendingMediaAfterWarning.Voice -> startRecordingAfterWarning()
+                    null -> Unit
+                }
             },
-            onCancel = { showPhotoWarning = false },
+            onCancel = {
+                pendingMediaAfterWarning = null
+                showPhotoWarning = false
+            },
         )
     }
 
@@ -379,6 +418,8 @@ fun ChatScreen(
         ImagePreviewReadySheet(
             uri = uri,
             isSending = isSending,
+            mediaRemaining = mediaRemaining,
+            onUpgrade = onViewPlansFromMedia,
             onSend = {
                 onSendImage(uri)
                 pendingImageUri = null
@@ -400,6 +441,8 @@ fun ChatScreen(
             durationSeconds = pendingVoiceDuration,
             localPath = pendingVoicePath,
             isSending = isSending,
+            mediaRemaining = mediaRemaining,
+            onUpgrade = onViewPlansFromMedia,
             onSend = onSendPendingVoice,
             onDiscard = onDiscardPendingVoice,
         )
@@ -568,6 +611,7 @@ private fun ChatHeader(
     partnerName: String,
     partnerPhotoUrl: String?,
     composerLocked: Boolean,
+    isAdminThread: Boolean,
     onBack: () -> Unit,
     onOpenPartnerProfile: () -> Unit,
     onQuickMessage: () -> Unit,
@@ -585,6 +629,7 @@ private fun ChatHeader(
     ) {
         Box(
             modifier = Modifier
+                .padding(end = 10.dp)
                 .size(36.dp)
                 .shadow(2.dp, CircleShape, clip = false, ambientColor = Color.Black.copy(alpha = 0.08f))
                 .clip(CircleShape)
@@ -603,12 +648,25 @@ private fun ChatHeader(
         Row(
             modifier = Modifier
                 .weight(1f)
-                .clickable(onClick = onOpenPartnerProfile)
+                .then(
+                    if (isAdminThread) Modifier
+                    else Modifier.clickable(onClick = onOpenPartnerProfile),
+                )
                 .padding(end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (partnerPhotoUrl.isNullOrBlank()) {
+            if (isAdminThread) {
+                Image(
+                    painter = painterResource(AdminSender.photoRes),
+                    contentDescription = partnerName,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .border(1.dp, colors.text.copy(alpha = 0.12f), CircleShape),
+                )
+            } else if (partnerPhotoUrl.isNullOrBlank()) {
                 Box(
                     modifier = Modifier
                         .size(36.dp)
@@ -643,14 +701,17 @@ private fun ChatHeader(
                     color = colors.text,
                     maxLines = 1,
                 )
-                Text(
-                    text = stringResource(R.string.messages_tap_to_see_profile),
-                    fontSize = 12.sp,
-                    color = colors.secondaryText,
-                    maxLines = 1,
-                )
+                if (!isAdminThread) {
+                    Text(
+                        text = stringResource(R.string.messages_tap_to_see_profile),
+                        fontSize = 12.sp,
+                        color = colors.secondaryText,
+                        maxLines = 1,
+                    )
+                }
             }
         }
+        if (!isAdminThread) {
         Row(
             modifier = Modifier
                 .shadow(2.dp, RoundedCornerShape(50), clip = false, ambientColor = Color.Black.copy(alpha = 0.08f))
@@ -674,6 +735,7 @@ private fun ChatHeader(
                 fontSize = 15.sp,
                 maxLines = 1,
             )
+        }
         }
     }
 }
@@ -1062,6 +1124,11 @@ private fun ChatComposerBar(
 
 private fun formatBubbleTime(date: java.util.Date): String =
     java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(date)
+
+private enum class PendingMediaAfterWarning {
+    Photo,
+    Voice,
+}
 
 @Composable
 private fun chatDayTitle(date: java.util.Date): String {

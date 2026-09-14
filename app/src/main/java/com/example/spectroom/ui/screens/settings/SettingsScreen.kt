@@ -8,9 +8,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -22,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Help
@@ -51,13 +55,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.spectroom.R
 import com.example.spectroom.data.model.AppLanguage
-import com.example.spectroom.ui.components.TabBarMainContentInset
+import com.example.spectroom.ui.components.TabBarBodyHeight
 import com.example.spectroom.ui.theme.LikeRed
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
 import com.example.spectroom.ui.theme.TabSelected
 
 private val SectionCorner = 12.dp
 private val SettingsTitleTopPadding = 12.dp
+/** Extra gap between the last settings row and the top of the tab bar. */
+private val SettingsMenuClearance = 20.dp
 private val SettingsTitleLineHeight = 40.dp
 private val SettingsTitleBottomPadding = 20.dp
 private val SettingsTitleBarReserve =
@@ -82,6 +88,7 @@ fun SettingsScreen(
     onHelp: () -> Unit = {},
     onAbout: () -> Unit = {},
     onExportMessages: () -> Unit = {},
+    onAccountBilling: () -> Unit = {},
     isAdmin: Boolean = false,
     onAdmin: () -> Unit = {},
     onDeleteAccount: () -> Unit = {},
@@ -91,6 +98,9 @@ fun SettingsScreen(
     val colors = LocalSpectRoomColors.current
     val language = AppLanguage.fromCode(languageCode)
     val isDebugBuild = (LocalContext.current.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+    val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    // Clear the white tab bar + system nav + a visible gap above the menu.
+    val settingsBottomPadding = navBarBottom + TabBarBodyHeight + SettingsMenuClearance
 
     Box(
         modifier = Modifier
@@ -109,7 +119,8 @@ fun SettingsScreen(
                     .weight(1f)
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp),
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = settingsBottomPadding),
             ) {
         SettingsSection(title = stringResource(R.string.settings_section_preferences)) {
             SettingsCard {
@@ -186,6 +197,13 @@ fun SettingsScreen(
         SettingsSection(title = stringResource(R.string.settings_section_account_data)) {
             SettingsCard {
                 SettingsNavigationRow(
+                    icon = Icons.Filled.CreditCard,
+                    title = stringResource(R.string.settings_account_billing),
+                    subtitle = stringResource(R.string.settings_account_billing_description),
+                    onClick = onAccountBilling,
+                )
+                SettingsDivider()
+                SettingsNavigationRow(
                     icon = Icons.Filled.Upload,
                     title = stringResource(R.string.settings_export_messages),
                     subtitle = stringResource(R.string.settings_export_messages_description),
@@ -252,11 +270,7 @@ fun SettingsScreen(
             }
             Spacer(modifier = Modifier.height(20.dp))
         }
-
-                Spacer(modifier = Modifier.height(12.dp))
             }
-
-            Spacer(modifier = Modifier.height(TabBarMainContentInset))
         }
 
         Box(

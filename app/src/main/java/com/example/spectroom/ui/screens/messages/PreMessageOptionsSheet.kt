@@ -8,8 +8,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -43,6 +45,9 @@ private enum class QuickMessageCategory {
     QUESTIONS,
 }
 
+/** Matches iOS NavigationView sheet presentation — tall fixed height, content scrolls inside. */
+private const val QuickMessageSheetHeightFraction = 0.92f
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PreMessageOptionsSheet(
@@ -60,17 +65,21 @@ fun PreMessageOptionsSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = colors.background,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        dragHandle = null,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .fillMaxHeight(QuickMessageSheetHeightFraction)
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp),
+                .navigationBarsPadding()
+                .padding(bottom = 16.dp),
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 14.dp),
+                    .padding(top = 16.dp, bottom = 14.dp),
             ) {
                 Column(
                     modifier = Modifier
@@ -124,7 +133,12 @@ fun PreMessageOptionsSheet(
                 )
             }
             Spacer(modifier = Modifier.height(12.dp))
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 items(messages.toList()) { message ->
                     Row(
                         modifier = Modifier
@@ -143,6 +157,7 @@ fun PreMessageOptionsSheet(
                         Text("+", color = colors.secondaryText, fontWeight = FontWeight.SemiBold)
                     }
                 }
+                item { Spacer(modifier = Modifier.height(24.dp)) }
             }
         }
     }

@@ -37,9 +37,27 @@ class AppPrefsStore(context: Context) {
         get() = prefs.getBoolean(KEY_SOUND, true)
         set(value) = prefs.edit().putBoolean(KEY_SOUND, value).apply()
 
-    var skipPhotoShareWarning: Boolean
-        get() = prefs.getBoolean(KEY_PHOTO_WARNING, false)
-        set(value) = prefs.edit().putBoolean(KEY_PHOTO_WARNING, value).apply()
+    /**
+     * iOS photo-safety reminder schedule: show on media taps 1, 20, and 40, then never again
+     * for that account. Clears the legacy forever-dismiss flag.
+     */
+    fun registerPhotoShareMediaTapAndShouldShow(accountKey: String?): Boolean {
+        prefs.edit().remove(KEY_PHOTO_WARNING_LEGACY).apply()
+        if (accountKey.isNullOrBlank()) return false
+        val key = photoShareTapCountKey(accountKey)
+        val nextCount = prefs.getInt(key, 0) + 1
+        prefs.edit().putInt(key, nextCount).apply()
+        return nextCount in PHOTO_SHARE_REMINDER_TAPS
+    }
+
+    fun resetPhotoShareWarning(accountKey: String?) {
+        prefs.edit().apply {
+            remove(KEY_PHOTO_WARNING_LEGACY)
+            if (!accountKey.isNullOrBlank()) remove(photoShareTapCountKey(accountKey))
+        }.apply()
+    }
+
+    private fun photoShareTapCountKey(accountKey: String) = "$KEY_PHOTO_WARNING_TAP_PREFIX$accountKey"
 
     /** Local flags for FCM client-side suppress (mirrors Firestore presence fields). */
     var appIsActive: Boolean
@@ -128,7 +146,9 @@ class AppPrefsStore(context: Context) {
         private const val KEY_LANGUAGE = "selectedLanguage"
         private const val KEY_NOTIFICATIONS = "notificationsEnabled"
         private const val KEY_SOUND = "soundEnabled"
-        private const val KEY_PHOTO_WARNING = "dontShowPhotoShareWarning"
+        private const val KEY_PHOTO_WARNING_LEGACY = "dontShowPhotoShareWarning"
+        private const val KEY_PHOTO_WARNING_TAP_PREFIX = "photoShareWarningMediaTapCount_"
+        private val PHOTO_SHARE_REMINDER_TAPS = setOf(1, 20, 40)
         private const val KEY_APP_ACTIVE = "notifAppIsActive"
         private const val KEY_MESSAGES_TAB = "notifMessagesTabActive"
         private const val KEY_OPEN_CONVERSATION = "notifOpenConversationUserId"

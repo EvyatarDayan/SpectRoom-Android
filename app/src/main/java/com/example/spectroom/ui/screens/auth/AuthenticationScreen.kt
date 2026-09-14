@@ -116,6 +116,7 @@ fun AuthenticationScreen(
     }
 
     fun submit() {
+        if (isLoading) return
         clearErrors()
         if (isLoginMode) {
             onSignIn(email, password)

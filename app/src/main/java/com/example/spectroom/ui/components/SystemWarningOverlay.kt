@@ -24,8 +24,11 @@ import androidx.compose.ui.unit.sp
 import com.example.spectroom.R
 import com.example.spectroom.data.model.ModerationNotice
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
-import java.text.DateFormat
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.util.Date
+import java.util.Locale
 
 @Composable
 fun SystemWarningOverlay(
@@ -56,8 +59,7 @@ fun SystemWarningOverlay(
             formatUnlock(notice.until),
         )
         is ModerationNotice.LoginBlocked -> {
-            val hours = maxOf(1, ((notice.until.time - System.currentTimeMillis()) / 3_600_000L).toInt())
-            stringResource(R.string.admin_freeze_popup_message, hours, formatUnlock(notice.until))
+            stringResource(R.string.admin_freeze_popup_message, notice.hours, formatUnlock(notice.until))
         }
         is ModerationNotice.BanAcknowledgement,
         is ModerationNotice.LoginBanned,
@@ -148,5 +150,11 @@ fun SystemWarningOverlay(
 
 private val TabSelectedBlue = Color(0xFF007AFF)
 
-private fun formatUnlock(date: Date): String =
-    DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(date)
+/** Matches iOS `ModerationNotice.formattedUnlockDate` (abbreviated month + day + time). */
+private fun formatUnlock(date: Date): String {
+    val zoned = date.toInstant().atZone(ZoneId.systemDefault())
+    val locale = Locale.getDefault()
+    val datePart = DateTimeFormatter.ofPattern("MMM d", locale).format(zoned)
+    val timePart = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(locale).format(zoned)
+    return "$datePart, $timePart"
+}

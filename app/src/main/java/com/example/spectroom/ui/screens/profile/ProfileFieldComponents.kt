@@ -17,11 +17,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,11 +31,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.spectroom.R
+import com.example.spectroom.data.model.SensoryPreferenceOption
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
 import com.example.spectroom.ui.theme.PassRed
 import com.example.spectroom.ui.theme.TabSelected
@@ -331,7 +335,6 @@ fun ProfileSelectionChip(
     val colors = LocalSpectRoomColors.current
     Row(
         modifier = modifier
-            .fillMaxWidth()
             .clip(RoundedCornerShape(ProfileFieldStyle.fieldCorner))
             .background(if (isSelected) TabSelected.copy(alpha = 0.12f) else colors.card)
             .border(
@@ -355,7 +358,7 @@ fun ProfileSelectionChip(
             fontSize = 14.sp,
             fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
             color = if (isSelected) TabSelected else colors.text,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f, fill = false),
         )
     }
 }
@@ -378,7 +381,7 @@ fun ProfileChipGrid(
                         title = label,
                         isSelected = selected.any { it.equals(value, ignoreCase = true) },
                         onClick = { onToggle(value) },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
                 }
                 repeat(columns - rowItems.size) {
@@ -401,7 +404,43 @@ fun ProfileChipList(
                 title = label,
                 isSelected = selected.any { it.equals(value, ignoreCase = true) },
                 onClick = { onToggle(value) },
+                modifier = Modifier.fillMaxWidth(),
             )
+        }
+    }
+}
+
+@Composable
+fun ProfileSensoryPreferenceList(
+    selected: List<String>,
+    onToggle: (String) -> Unit,
+    onInfo: (SensoryPreferenceOption) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SensoryPreferenceOption.entries.forEach { option ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                ProfileSelectionChip(
+                    title = stringResource(option.titleRes),
+                    isSelected = selected.any { it.equals(option.rawValue, ignoreCase = true) },
+                    onClick = { onToggle(option.rawValue) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                )
+                Icon(
+                    painter = painterResource(R.drawable.ic_sensory_info),
+                    contentDescription = stringResource(option.subtitleRes),
+                    tint = TabSelected,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clickable { onInfo(option) }
+                        .padding(5.dp),
+                )
+            }
         }
     }
 }
@@ -418,6 +457,7 @@ fun ProfileChipListSingle(
                 title = label,
                 isSelected = selected.equals(value, ignoreCase = true),
                 onClick = { onSelect(value) },
+                modifier = Modifier.fillMaxWidth(),
             )
         }
     }

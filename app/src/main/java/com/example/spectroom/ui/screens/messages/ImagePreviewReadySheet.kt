@@ -1,8 +1,9 @@
 package com.example.spectroom.ui.screens.messages
 
 import android.net.Uri
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,28 +18,32 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.example.spectroom.R
 import com.example.spectroom.ui.theme.LikeGreen
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
+import com.example.spectroom.ui.theme.TabSelected
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ImagePreviewReadySheet(
     uri: Uri,
     isSending: Boolean,
+    mediaRemaining: Int? = null,
+    onUpgrade: (() -> Unit)? = null,
     onSend: () -> Unit,
     onDiscard: () -> Unit,
 ) {
@@ -54,6 +59,7 @@ fun ImagePreviewReadySheet(
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
                 .padding(top = 12.dp, bottom = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -64,6 +70,7 @@ fun ImagePreviewReadySheet(
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 17.sp,
                     color = colors.text,
+                    maxLines = 1,
                 )
                 Box(
                     modifier = Modifier.fillMaxWidth(),
@@ -75,24 +82,30 @@ fun ImagePreviewReadySheet(
                         contentScale = ContentScale.Fit,
                         modifier = Modifier
                             .heightIn(max = 100.dp)
+                            .fillMaxWidth()
                             .clip(RoundedCornerShape(14.dp)),
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
-
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                OutlinedButton(
+                Button(
                     onClick = onDiscard,
                     enabled = !isSending,
                     modifier = Modifier
                         .weight(1f)
                         .height(48.dp),
                     shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colors.secondaryText.copy(alpha = 0.12f),
+                        contentColor = TabSelected,
+                        disabledContainerColor = colors.secondaryText.copy(alpha = 0.08f),
+                        disabledContentColor = TabSelected.copy(alpha = 0.45f),
+                    ),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
                 ) {
                     Text(
                         text = stringResource(R.string.common_cancel),
@@ -116,7 +129,7 @@ fun ImagePreviewReadySheet(
                             CircularProgressIndicator(
                                 modifier = Modifier.size(16.dp),
                                 strokeWidth = 2.dp,
-                                color = androidx.compose.ui.graphics.Color.White,
+                                color = Color.White,
                             )
                             Text(
                                 text = stringResource(R.string.messages_sending),
@@ -131,6 +144,46 @@ fun ImagePreviewReadySheet(
                     }
                 }
             }
+
+            if (mediaRemaining != null) {
+                MediaRemainingUpgradeFooter(
+                    remainingCount = mediaRemaining,
+                    enabled = !isSending,
+                    onUpgrade = onUpgrade,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun MediaRemainingUpgradeFooter(
+    remainingCount: Int,
+    enabled: Boolean = true,
+    onUpgrade: (() -> Unit)? = null,
+) {
+    val colors = LocalSpectRoomColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(R.string.messages_media_preview_remaining, remainingCount),
+            fontSize = 13.sp,
+            color = colors.secondaryText,
+            textAlign = TextAlign.Center,
+        )
+        if (onUpgrade != null) {
+            Text(
+                text = stringResource(R.string.messages_media_preview_upgrade),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = if (enabled) TabSelected else TabSelected.copy(alpha = 0.45f),
+                modifier = Modifier.clickable(enabled = enabled, onClick = onUpgrade),
+            )
         }
     }
 }
