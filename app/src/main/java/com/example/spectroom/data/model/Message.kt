@@ -63,6 +63,8 @@ data class MessageDisplay(
     val senderProfilePhotoURL: String? = null,
     val recipientProfilePhotoURL: String? = null,
     val voiceDurationSeconds: Double? = null,
+    val thumbnailURL: String? = null,
+    val videoDurationSeconds: Double? = null,
 ) {
     val deduplicationKey: String
         get() = "${senderId}_${recipientId}_${messageType.rawValue}_$content"

@@ -178,6 +178,11 @@ fun MediaRemainingUpgradeFooter(
         )
         if (onUpgrade != null) {
             Text(
+                text = ", ",
+                fontSize = 13.sp,
+                color = colors.secondaryText,
+            )
+            Text(
                 text = stringResource(R.string.messages_media_preview_upgrade),
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,

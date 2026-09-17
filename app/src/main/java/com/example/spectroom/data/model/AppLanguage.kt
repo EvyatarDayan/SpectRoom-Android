@@ -6,9 +6,9 @@ data class AppLanguage(
     val flag: String,
 ) {
     companion object {
+        val Swedish = AppLanguage("sv", "Swedish", "🇸🇪")
         val English = AppLanguage("en", "English", "🇺🇸")
         val Spanish = AppLanguage("es", "Spanish", "🇪🇸")
-        val Swedish = AppLanguage("sv", "Swedish", "🇸🇪")
         val French = AppLanguage("fr", "French", "🇫🇷")
         val German = AppLanguage("de", "German", "🇩🇪")
         val Danish = AppLanguage("da", "Danish", "🇩🇰")
@@ -16,12 +16,13 @@ data class AppLanguage(
         val Finnish = AppLanguage("fi", "Finnish", "🇫🇮")
         val Icelandic = AppLanguage("is", "Icelandic", "🇮🇸")
 
+        /** Same order as iOS `Language.allLanguages` — Swedish first (app default). */
         val all = listOf(
-            English, Spanish, Swedish, French, German,
+            Swedish, English, Spanish, French, German,
             Danish, Norwegian, Finnish, Icelandic,
         )
 
         fun fromCode(code: String): AppLanguage =
-            all.firstOrNull { it.code == code } ?: English
+            all.firstOrNull { it.code == code } ?: Swedish
     }
 }

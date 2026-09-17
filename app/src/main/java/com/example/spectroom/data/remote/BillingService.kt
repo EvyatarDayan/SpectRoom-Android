@@ -4,12 +4,13 @@ import android.content.Context
 import android.util.Log
 import com.example.spectroom.SpectRoomApplication
 import com.example.spectroom.data.local.PlanEntitlementsStore
+import com.example.spectroom.data.model.AccountHistoryEvent
+import com.example.spectroom.data.model.AccountHistoryEventKind
 import com.example.spectroom.data.model.BillingInterval
 import com.example.spectroom.data.model.BillingServiceException
 import com.example.spectroom.data.model.BillingSnapshot
 import com.example.spectroom.data.model.CardBrand
 import com.example.spectroom.data.model.CurrentSubscription
-import com.example.spectroom.data.model.Invoice
 import com.example.spectroom.data.model.InvoiceStatus
 import com.example.spectroom.data.model.NewCardDraft
 import com.example.spectroom.data.model.PaymentMethod
@@ -25,6 +26,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import org.json.JSONArray
+import org.json.JSONObject
 import java.math.BigDecimal
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -132,6 +135,8 @@ class MockBillingService private constructor(
     private val planEntitlementsStore = PlanEntitlementsStore(appContext)
     private var snapshot: BillingSnapshot = makeInitialSnapshot()
     private var onPlanChanged: ((PlanTier, BillingInterval) -> Unit)? = null
+    private var onSubscriptionCancelled: ((CurrentSubscription) -> Unit)? = null
+    private var accountHistoryUid: String? = null
 
     init {
         // Never downgrade a higher local entitlement with a Free mock snapshot (iOS: local billing wins).
@@ -146,8 +151,15 @@ class MockBillingService private constructor(
         planEntitlementsStore.syncPlanTier(resolved)
     }
 
+    val accountHistory: List<AccountHistoryEvent>
+        get() = snapshot.accountHistory
+
     fun setOnPlanChangedListener(listener: ((PlanTier, BillingInterval) -> Unit)?) {
         onPlanChanged = listener
+    }
+
+    fun setOnSubscriptionCancelledListener(listener: ((CurrentSubscription) -> Unit)?) {
+        onSubscriptionCancelled = listener
     }
 
     val currentSubscription: CurrentSubscription
@@ -155,28 +167,56 @@ class MockBillingService private constructor(
 
     /**
      * Align mock subscription + local entitlements to [tier] (persisted).
-     * When [interval] is provided (e.g. from Firestore), it becomes the billing cycle.
+     * When [interval] / [status] are provided (e.g. from Firestore), they become source of truth.
      */
-    fun alignWithPlanTier(tier: PlanTier, interval: BillingInterval? = null) {
+    fun alignWithPlanTier(
+        tier: PlanTier,
+        interval: BillingInterval? = null,
+        status: SubscriptionStatus? = null,
+    ) {
         val resolvedInterval = when {
             tier == PlanTier.FREE -> BillingInterval.MONTHLY
             interval != null -> interval
             else -> snapshot.subscription.interval
         }
+        val resolvedStatus = when {
+            tier == PlanTier.FREE -> SubscriptionStatus.NONE
+            status != null -> status
+            else -> snapshot.subscription.status
+        }
+        val current = snapshot.subscription
         if (
-            snapshot.subscription.tier == tier &&
-            snapshot.subscription.interval == resolvedInterval
+            current.tier == tier &&
+            current.interval == resolvedInterval &&
+            current.status == resolvedStatus
         ) {
             planEntitlementsStore.syncBillingPlan(tier, resolvedInterval)
             return
         }
-        val aligned = subscriptionForTier(
+        val base = subscriptionForTier(
             tier = tier,
             interval = resolvedInterval,
-            preferExistingRenewal = snapshot.subscription.takeIf {
+            preferExistingRenewal = current.takeIf {
                 it.tier == tier && it.interval == resolvedInterval
             },
         )
+        val aligned = when {
+            tier == PlanTier.FREE -> base.copy(
+                status = SubscriptionStatus.NONE,
+                cancelledAtMillis = null,
+            )
+            resolvedStatus == SubscriptionStatus.CANCELLED -> base.copy(
+                status = SubscriptionStatus.CANCELLED,
+                cancelledAtMillis = current.cancelledAtMillis
+                    ?.takeIf { current.tier == tier && current.interval == resolvedInterval }
+                    ?: System.currentTimeMillis(),
+                renewsOnMillis = current.renewsOnMillis ?: base.renewsOnMillis,
+            )
+            else -> base.copy(
+                status = resolvedStatus,
+                cancelledAtMillis = null,
+            )
+        }
         snapshot = snapshot.copy(subscription = aligned)
         persistSubscription(aligned)
         planEntitlementsStore.syncBillingPlan(tier, resolvedInterval)
@@ -189,6 +229,8 @@ class MockBillingService private constructor(
             planEntitlementsStore.currentPlanTier,
             planEntitlementsStore.currentBillingInterval,
         )
+        processDueAutomaticBillingIfNeeded()
+        refreshAccountHistoryFromCloud()
         return snapshot
     }
 
@@ -232,6 +274,7 @@ class MockBillingService private constructor(
         // Fire-and-forget on an app-scoped job BEFORE notifying UI (iOS: Task { await ... }).
         // Awaiting here on the Compose scope gets cancelled when onPlanChanged recomposes.
         if (changed) {
+            appendPlanChangeHistory(from = previous, to = next, plan = plan)
             PlanChangeEmailNotifier.notifyChangedAsync(previous, next)
         }
         onPlanChanged?.invoke(plan.tier, next.interval)
@@ -243,22 +286,30 @@ class MockBillingService private constructor(
         if (snapshot.subscription.tier == PlanTier.FREE) {
             throw BillingServiceException.NothingToCancel
         }
-        val current = snapshot.subscription
-        val renewsOn = current.renewsOnMillis ?: Calendar.getInstance().run {
+        val beforeCancel = snapshot.subscription
+        val renewsOn = beforeCancel.renewsOnMillis ?: Calendar.getInstance().run {
             add(
-                if (current.interval == BillingInterval.YEARLY) Calendar.YEAR else Calendar.MONTH,
+                if (beforeCancel.interval == BillingInterval.YEARLY) Calendar.YEAR else Calendar.MONTH,
                 1,
             )
             timeInMillis
         }
-        val subscription = current.copy(
+        val subscription = beforeCancel.copy(
             status = SubscriptionStatus.CANCELLED,
             cancelledAtMillis = System.currentTimeMillis(),
             renewsOnMillis = renewsOn,
         )
         snapshot = snapshot.copy(subscription = subscription)
         persistSubscription(subscription)
+        appendHistoryEvent(
+            AccountHistoryEvent(
+                kind = AccountHistoryEventKind.CANCEL_PLAN,
+                planTier = beforeCancel.tier,
+                interval = beforeCancel.interval,
+            ),
+        )
         PlanChangeEmailNotifier.notifyCancelledAsync(subscription)
+        onSubscriptionCancelled?.invoke(subscription)
         // Cancelled paid plans keep remaining access; entitlements stay on current tier.
         return snapshot.subscription
     }
@@ -370,11 +421,153 @@ class MockBillingService private constructor(
                     isDefault = false,
                 ),
             ),
-            invoices = defaultInvoices(),
+            accountHistory = emptyList(),
             applePayEnabled = true,
             googlePayEnabled = false,
         )
     }
+
+    private suspend fun appendPlanChangeHistory(
+        from: CurrentSubscription,
+        to: CurrentSubscription,
+        plan: SubscriptionPlan,
+    ) {
+        val kind = if (from.tier == PlanTier.FREE && to.tier != PlanTier.FREE) {
+            AccountHistoryEventKind.NEW_PLAN
+        } else {
+            AccountHistoryEventKind.CHANGE_PLAN
+        }
+        val now = System.currentTimeMillis()
+        // Paid take-up also records the charge. Give the plan action a slightly later
+        // timestamp so it stays above the charge after date sorting.
+        if (to.tier != PlanTier.FREE) {
+            appendAutomaticBillingEvent(plan = plan, interval = to.interval, atMillis = now)
+        }
+        appendHistoryEvent(
+            AccountHistoryEvent(
+                dateMillis = now + 1,
+                kind = kind,
+                planTier = to.tier,
+                interval = to.interval,
+            ),
+        )
+    }
+
+    private suspend fun appendAutomaticBillingEvent(
+        plan: SubscriptionPlan,
+        interval: BillingInterval,
+        atMillis: Long,
+    ) {
+        appendHistoryEvent(
+            AccountHistoryEvent(
+                dateMillis = atMillis,
+                kind = AccountHistoryEventKind.AUTOMATIC_BILLING,
+                planTier = plan.tier,
+                interval = interval,
+                amount = plan.price(interval),
+                currencyCode = plan.currencyCode,
+                status = InvoiceStatus.PAID,
+            ),
+        )
+    }
+
+    private suspend fun appendHistoryEvent(event: AccountHistoryEvent) {
+        val pushed = AccountHistoryCloudSync.pushEvent(event)
+        if (!pushed) {
+            android.util.Log.e(
+                "MockBillingService",
+                "Account history event was not written to Firestore id=${event.id}",
+            )
+            return
+        }
+        // Display list comes only from Firestore.
+        refreshAccountHistoryFromCloud()
+    }
+
+    /** Firestore is the only source for the Account History list when signed in. */
+    private suspend fun refreshAccountHistoryFromCloud() {
+        accountHistoryUid = FirebaseAuth.getInstance().currentUser?.uid
+        val remote = AccountHistoryCloudSync.fetchEvents()
+        snapshot = snapshot.copy(accountHistory = remote)
+        persistAccountHistory(remote)
+    }
+
+    /**
+     * When a renewing paid plan's period ends, log automatic billing and roll `renewsOn` forward.
+     * Cancelled plans that lapse become Free (no billing charge).
+     */
+    private suspend fun processDueAutomaticBillingIfNeeded() {
+        var subscription = snapshot.subscription
+        val renewsOn = subscription.renewsOnMillis ?: return
+        if (subscription.tier == PlanTier.FREE || renewsOn > System.currentTimeMillis()) return
+        val plan = snapshot.availablePlans.firstOrNull { it.id == subscription.planId } ?: return
+
+        if (subscription.status == SubscriptionStatus.CANCELLED) {
+            subscription = CurrentSubscription(
+                planId = "plan_free",
+                tier = PlanTier.FREE,
+                status = SubscriptionStatus.NONE,
+                interval = BillingInterval.MONTHLY,
+            )
+            snapshot = snapshot.copy(subscription = subscription)
+            persistSubscription(subscription)
+            planEntitlementsStore.syncBillingPlan(PlanTier.FREE, BillingInterval.MONTHLY)
+            onPlanChanged?.invoke(PlanTier.FREE, BillingInterval.MONTHLY)
+            appendHistoryEvent(
+                AccountHistoryEvent(
+                    dateMillis = renewsOn,
+                    kind = AccountHistoryEventKind.CHANGE_PLAN,
+                    planTier = PlanTier.FREE,
+                    interval = BillingInterval.MONTHLY,
+                ),
+            )
+            return
+        }
+
+        var cursor = renewsOn
+        val now = System.currentTimeMillis()
+        var safety = 0
+        while (cursor <= now && safety < 36) {
+            appendAutomaticBillingEvent(plan = plan, interval = subscription.interval, atMillis = cursor)
+            val cal = Calendar.getInstance().apply { timeInMillis = cursor }
+            cal.add(
+                if (subscription.interval == BillingInterval.YEARLY) Calendar.YEAR else Calendar.MONTH,
+                1,
+            )
+            cursor = cal.timeInMillis
+            safety += 1
+        }
+        subscription = subscription.copy(
+            renewsOnMillis = cursor,
+            status = SubscriptionStatus.RENEWING,
+        )
+        snapshot = snapshot.copy(subscription = subscription)
+        persistSubscription(subscription)
+    }
+
+    private fun persistAccountHistory(events: List<AccountHistoryEvent>) {
+        val uid = accountHistoryUid ?: FirebaseAuth.getInstance().currentUser?.uid
+        val key = accountHistoryPrefsKey(uid)
+        val array = JSONArray()
+        events.forEach { event ->
+            array.put(
+                JSONObject().apply {
+                    put("id", event.id)
+                    put("date", event.dateMillis)
+                    put("kind", event.kind.rawValue)
+                    put("currencyCode", event.currencyCode)
+                    event.planTier?.let { put("planTier", it.rawValue) }
+                    event.interval?.let { put("interval", it.rawValue) }
+                    event.amount?.let { put("amount", it.toPlainString()) }
+                    event.status?.let { put("status", it.rawValue) }
+                },
+            )
+        }
+        prefs.edit().putString(key, array.toString()).apply()
+    }
+
+    private fun accountHistoryPrefsKey(uid: String?): String =
+        if (uid.isNullOrBlank()) KEY_ACCOUNT_HISTORY else "${KEY_ACCOUNT_HISTORY}_$uid"
 
     private fun loadPersistedSubscription(validPlanIds: Set<String>): CurrentSubscription? {
         val planId = prefs.getString(KEY_PLAN_ID, null) ?: return null
@@ -484,6 +677,7 @@ class MockBillingService private constructor(
         private const val KEY_INTERVAL = "mockBillingInterval"
         private const val KEY_RENEWS_ON = "mockBillingRenewsOn"
         private const val KEY_CANCELLED_AT = "mockBillingCancelledAt"
+        private const val KEY_ACCOUNT_HISTORY = "mockBillingAccountHistory"
 
         private fun defaultPlans(): List<SubscriptionPlan> = listOf(
             SubscriptionPlan(
@@ -512,95 +706,5 @@ class MockBillingService private constructor(
             ),
         )
 
-        private fun defaultInvoices(): List<Invoice> {
-            fun monthsAgo(n: Int): Long {
-                val c = Calendar.getInstance()
-                c.add(Calendar.MONTH, -n)
-                return c.timeInMillis
-            }
-            return listOf(
-                Invoice(
-                    id = "inv_1003",
-                    dateMillis = monthsAgo(1),
-                    description = "SpectRoom Pro — Monthly",
-                    planTier = PlanTier.PRO,
-                    interval = BillingInterval.MONTHLY,
-                    amount = BigDecimal("9.99"),
-                    currencyCode = "USD",
-                    status = InvoiceStatus.PAID,
-                    pdfUrl = "https://example.com/invoices/inv_1003.pdf",
-                ),
-                Invoice(
-                    id = "inv_1002",
-                    dateMillis = monthsAgo(2),
-                    description = "SpectRoom Pro — Monthly",
-                    planTier = PlanTier.PRO,
-                    interval = BillingInterval.MONTHLY,
-                    amount = BigDecimal("9.99"),
-                    currencyCode = "USD",
-                    status = InvoiceStatus.PAID,
-                    pdfUrl = "https://example.com/invoices/inv_1002.pdf",
-                ),
-                Invoice(
-                    id = "inv_1001",
-                    dateMillis = monthsAgo(3),
-                    description = "SpectRoom Pro — Monthly",
-                    planTier = PlanTier.PRO,
-                    interval = BillingInterval.MONTHLY,
-                    amount = BigDecimal("9.99"),
-                    currencyCode = "USD",
-                    status = InvoiceStatus.REFUNDED,
-                    pdfUrl = "https://example.com/invoices/inv_1001.pdf",
-                ),
-                Invoice(
-                    id = "inv_1000",
-                    dateMillis = monthsAgo(4),
-                    description = "SpectRoom Premium — Monthly",
-                    planTier = PlanTier.PREMIUM,
-                    interval = BillingInterval.YEARLY,
-                    amount = BigDecimal("19.99"),
-                    currencyCode = "USD",
-                    status = InvoiceStatus.PAID,
-                    pdfUrl = "https://example.com/invoices/inv_1000.pdf",
-                ),
-                Invoice(
-                    id = "inv_0999",
-                    dateMillis = monthsAgo(5),
-                    description = "SpectRoom Pro — Monthly",
-                    planTier = PlanTier.PRO,
-                    interval = BillingInterval.MONTHLY,
-                    amount = BigDecimal("9.99"),
-                    currencyCode = "USD",
-                    status = InvoiceStatus.PENDING,
-                    pdfUrl = null,
-                ),
-                Invoice(
-                    id = "inv_0998",
-                    dateMillis = monthsAgo(6),
-                    description = "SpectRoom Pro — Monthly",
-                    planTier = PlanTier.PRO,
-                    interval = BillingInterval.MONTHLY,
-                    amount = BigDecimal("9.99"),
-                    currencyCode = "USD",
-                    status = InvoiceStatus.PAID,
-                    pdfUrl = "https://example.com/invoices/inv_0998.pdf",
-                ),
-                Invoice(
-                    id = "inv_old",
-                    dateMillis = run {
-                        val c = Calendar.getInstance()
-                        c.add(Calendar.YEAR, -4)
-                        c.timeInMillis
-                    },
-                    description = "SpectRoom Pro — Monthly",
-                    planTier = PlanTier.PRO,
-                    interval = BillingInterval.MONTHLY,
-                    amount = BigDecimal("9.99"),
-                    currencyCode = "USD",
-                    status = InvoiceStatus.PAID,
-                    pdfUrl = null,
-                ),
-            )
-        }
     }
 }

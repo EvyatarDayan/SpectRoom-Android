@@ -17,12 +17,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -252,7 +250,7 @@ private fun BlockedUserAvatar(
 }
 
 @Composable
-private fun UnblockConfirmationOverlay(
+fun UnblockConfirmationOverlay(
     firstName: String,
     onCancel: () -> Unit,
     onConfirm: () -> Unit,
@@ -267,67 +265,66 @@ private fun UnblockConfirmationOverlay(
     ) {
         Column(
             modifier = Modifier
-                .fillMaxWidth(0.82f)
+                .padding(horizontal = 36.dp)
+                .fillMaxWidth()
                 .clip(RoundedCornerShape(16.dp))
                 .background(colors.card)
-                .clickable(enabled = false) {}
-                .padding(top = 20.dp, bottom = 20.dp),
+                .clickable(enabled = false) {},
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp),
-            ) {
-                IconButton(
-                    onClick = onCancel,
-                    modifier = Modifier.align(Alignment.TopEnd),
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Close,
-                        contentDescription = stringResource(R.string.settings_cancel),
-                        tint = colors.secondaryText,
-                    )
-                }
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(end = 32.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text(
-                        text = stringResource(R.string.settings_blocked_users_unblock_confirm_title, firstName),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 17.sp,
-                        color = colors.text,
-                        textAlign = TextAlign.Center,
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = stringResource(R.string.settings_blocked_users_unblock_confirm_message, firstName),
-                        fontSize = 15.sp,
-                        lineHeight = 20.sp,
-                        color = colors.secondaryText,
-                        textAlign = TextAlign.Center,
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-            TextButton(
-                onClick = onConfirm,
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(LikeGreen.copy(alpha = 0.1f))
-                    .border(1.dp, LikeGreen.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
+                    .padding(top = 20.dp, bottom = 18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    text = stringResource(R.string.settings_blocked_users_unblock),
-                    color = LikeGreen,
+                    text = stringResource(R.string.settings_blocked_users_unblock_confirm_title, firstName),
                     fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(vertical = 6.dp),
+                    fontSize = 17.sp,
+                    color = colors.text,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(bottom = 4.dp),
                 )
+                Text(
+                    text = stringResource(R.string.settings_blocked_users_unblock_confirm_message, firstName),
+                    fontSize = 15.sp,
+                    lineHeight = 20.sp,
+                    color = colors.secondaryText,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            HorizontalDivider(color = colors.border)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        text = stringResource(R.string.common_cancel),
+                        color = colors.text,
+                        fontSize = 16.sp,
+                    )
+                }
+                VerticalDivider(modifier = Modifier.height(44.dp), color = colors.border)
+                TextButton(
+                    onClick = onConfirm,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        text = stringResource(R.string.settings_blocked_users_unblock),
+                        color = LikeGreen,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 16.sp,
+                    )
+                }
             }
         }
     }

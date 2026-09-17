@@ -291,3 +291,97 @@ fun VoiceLongPressTipOverlay(onDismiss: () -> Unit) {
         }
     }
 }
+
+/** Mirrors iOS image size validation alert — title, message, single Got It action. */
+@Composable
+fun ImageFileSizeTooLargeOverlay(onDismiss: () -> Unit) {
+    val colors = LocalSpectRoomColors.current
+    val dismissInteraction = remember { MutableInteractionSource() }
+    val okInteraction = remember { MutableInteractionSource() }
+    val cardShape = RoundedCornerShape(28.dp)
+    val cardBackground = if (colors.isDark) {
+        Color(0xFF2C2C2E).copy(alpha = 0.88f)
+    } else {
+        Color.White.copy(alpha = 0.82f)
+    }
+    val buttonBackground = if (colors.isDark) {
+        Color.White.copy(alpha = 0.12f)
+    } else {
+        Color.Black.copy(alpha = 0.08f)
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.35f))
+                .clickable(
+                    interactionSource = dismissInteraction,
+                    indication = null,
+                    onClick = onDismiss,
+                )
+                .padding(horizontal = 28.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(cardShape)
+                    .background(cardBackground)
+                    .border(
+                        width = 0.5.dp,
+                        color = if (colors.isDark) {
+                            Color.White.copy(alpha = 0.14f)
+                        } else {
+                            Color.White.copy(alpha = 0.65f)
+                        },
+                        shape = cardShape,
+                    )
+                    .clickable(enabled = false) {}
+                    .padding(horizontal = 20.dp, vertical = 22.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.messages_image_error_size_title),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp,
+                    color = colors.text,
+                    textAlign = TextAlign.Start,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = stringResource(R.string.messages_image_error_size),
+                    color = colors.secondaryText,
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                    textAlign = TextAlign.Start,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(22.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(50))
+                        .background(buttonBackground)
+                        .clickable(
+                            interactionSource = okInteraction,
+                            indication = null,
+                            onClick = onDismiss,
+                        )
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(R.string.common_got_it),
+                        color = colors.text,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 17.sp,
+                    )
+                }
+            }
+        }
+    }
+}

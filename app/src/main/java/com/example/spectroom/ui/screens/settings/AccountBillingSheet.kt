@@ -20,9 +20,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -50,11 +51,11 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.example.spectroom.R
 import com.example.spectroom.data.local.BillingHistoryExport
+import com.example.spectroom.data.model.AccountHistoryEvent
 import com.example.spectroom.data.model.BillingInterval
 import com.example.spectroom.data.model.BillingServiceException
 import com.example.spectroom.data.model.BillingSnapshot
 import com.example.spectroom.data.model.CurrentSubscription
-import com.example.spectroom.data.model.Invoice
 import com.example.spectroom.data.model.PlanTier
 import com.example.spectroom.data.model.SubscriptionPlan
 import com.example.spectroom.data.model.SubscriptionStatus
@@ -67,9 +68,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+
+/** Matches iOS system `Color.green` (#34C759). */
+private val BillingGreen = Color(0xFF34C759)
+
 private data class PendingPlanChange(
     val plan: SubscriptionPlan,
     val interval: BillingInterval,
@@ -87,7 +89,7 @@ private class AccountBillingState(
     var selectedInterval by mutableStateOf(BillingInterval.MONTHLY)
     var subscription by mutableStateOf<CurrentSubscription?>(null)
     var plans by mutableStateOf<List<SubscriptionPlan>>(emptyList())
-    var invoices by mutableStateOf<List<Invoice>>(emptyList())
+    var accountHistory by mutableStateOf<List<AccountHistoryEvent>>(emptyList())
     var isBusy by mutableStateOf(false)
     var isExportingBillingHistory by mutableStateOf(false)
     var pendingPlanChange by mutableStateOf<PendingPlanChange?>(null)
@@ -97,7 +99,8 @@ private class AccountBillingState(
     /** Shown after cancel confirm dismisses — mirrors iOS `cancelSuccessPlanLabel`. */
     var cancelSuccessPlanLabel by mutableStateOf<String?>(null)
 
-    fun recentInvoices(): List<Invoice> = BillingHistoryExport.recentInvoices(invoices)
+    fun recentAccountHistory(): List<AccountHistoryEvent> =
+        BillingHistoryExport.recentEvents(accountHistory)
 
     suspend fun load() {
         isLoading = true
@@ -127,6 +130,7 @@ private class AccountBillingState(
         try {
             subscription = service.changePlan(plan.id, interval)
             selectedInterval = subscription?.interval ?: interval
+            syncAccountHistoryFromService()
             onPlanChanged(plan.tier, selectedInterval)
             planChangeSuccessLabel = successLabel
         } catch (e: Exception) {
@@ -150,11 +154,17 @@ private class AccountBillingState(
         isBusy = true
         try {
             subscription = service.cancelSubscription()
+            syncAccountHistoryFromService()
             cancelSuccessPlanLabel = planLabel
         } catch (e: Exception) {
             showToast(errorMessage(e))
         }
         isBusy = false
+    }
+
+    private fun syncAccountHistoryFromService() {
+        val billing = service as? MockBillingService ?: return
+        accountHistory = billing.accountHistory.sortedByDescending { it.dateMillis }
     }
 
     fun isCurrent(plan: SubscriptionPlan): Boolean =
@@ -191,7 +201,7 @@ private class AccountBillingState(
     private fun apply(snap: BillingSnapshot) {
         subscription = snap.subscription
         plans = snap.availablePlans
-        invoices = snap.invoices.sortedByDescending { it.dateMillis }
+        accountHistory = snap.accountHistory.sortedByDescending { it.dateMillis }
         selectedInterval = snap.subscription.interval
     }
 
@@ -204,9 +214,11 @@ private class AccountBillingState(
 fun AccountBillingSheet(
     onDismiss: () -> Unit,
     onPlanChanged: (PlanTier, BillingInterval) -> Unit = { _, _ -> },
+    onSubscriptionCancelled: (CurrentSubscription) -> Unit = {},
     accountEmail: String = "",
     seedPlanTier: PlanTier = PlanTier.FREE,
     seedBillingInterval: BillingInterval = BillingInterval.MONTHLY,
+    seedSubscriptionStatus: SubscriptionStatus = SubscriptionStatus.NONE,
     onShareExportedPdf: (android.net.Uri) -> Unit = {},
 ) {
     val colors = LocalSpectRoomColors.current
@@ -224,10 +236,15 @@ fun AccountBillingSheet(
 
     LaunchedEffect(Unit) {
         MockBillingService.shared.setOnPlanChangedListener(onPlanChanged)
+        MockBillingService.shared.setOnSubscriptionCancelledListener(onSubscriptionCancelled)
     }
 
-    LaunchedEffect(seedPlanTier, seedBillingInterval) {
-        MockBillingService.shared.alignWithPlanTier(seedPlanTier, seedBillingInterval)
+    LaunchedEffect(seedPlanTier, seedBillingInterval, seedSubscriptionStatus) {
+        MockBillingService.shared.alignWithPlanTier(
+            seedPlanTier,
+            seedBillingInterval,
+            seedSubscriptionStatus,
+        )
         state.load()
     }
 
@@ -289,7 +306,7 @@ fun AccountBillingSheet(
                     Text(
                         text = toast,
                         color = Color.White,
-                        fontSize = 14.sp,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
@@ -531,7 +548,7 @@ private fun BillingSheetHeader(onDismiss: () -> Unit) {
         Text(
             text = stringResource(R.string.common_close),
             color = colors.text,
-            fontSize = 15.sp,
+            fontSize = 16.sp,
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .clip(RoundedCornerShape(50))
@@ -543,7 +560,7 @@ private fun BillingSheetHeader(onDismiss: () -> Unit) {
         Text(
             text = stringResource(R.string.billing_title),
             fontWeight = FontWeight.Bold,
-            fontSize = 20.sp,
+            fontSize = 22.sp,
             color = colors.text,
             textAlign = TextAlign.Center,
             modifier = Modifier
@@ -641,22 +658,26 @@ private fun BillingIntervalSection(
                         .clip(RoundedCornerShape(10.dp))
                         .background(if (selected) TabSelected else colors.background)
                         .clickable { onIntervalChange(interval) }
-                        .padding(vertical = 10.dp),
+                        .padding(horizontal = 8.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
                         text = stringResource(interval.titleRes),
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.sp,
+                        fontSize = 17.sp,
                         color = if (selected) Color.White else colors.text,
+                        maxLines = 1,
+                        softWrap = false,
                     )
                     if (interval == BillingInterval.YEARLY) {
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = stringResource(R.string.billing_save_percent),
-                            fontSize = 10.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false,
                             color = if (selected) {
                                 Color.White
                             } else {
@@ -666,18 +687,18 @@ private fun BillingIntervalSection(
                                 .clip(RoundedCornerShape(50))
                                 .background(
                                     if (selected) {
-                                        Color(0xFF2E7D32)
+                                        BillingGreen
                                     } else {
-                                        Color(0xFF2E7D32).copy(alpha = 0.22f)
+                                        BillingGreen.copy(alpha = 0.22f)
                                     },
                                 )
-                                .padding(horizontal = 6.dp, vertical = 3.dp),
+                                .padding(horizontal = 7.dp, vertical = 4.dp),
                         )
                     }
                 }
             }
         }
-        var planLabelSize by remember(currentPlanLabel) { mutableStateOf(14.sp) }
+        var planLabelSize by remember(currentPlanLabel) { mutableStateOf(15.sp) }
         Text(
             text = currentPlanLabel,
             color = colors.secondaryText,
@@ -687,8 +708,8 @@ private fun BillingIntervalSection(
             softWrap = false,
             overflow = TextOverflow.Clip,
             onTextLayout = { result ->
-                if (result.hasVisualOverflow && planLabelSize > 10.sp) {
-                    planLabelSize = (planLabelSize.value * 0.9f).coerceAtLeast(10f).sp
+                if (result.hasVisualOverflow && planLabelSize > 11.sp) {
+                    planLabelSize = (planLabelSize.value * 0.9f).coerceAtLeast(11f).sp
                 }
             },
             modifier = Modifier.fillMaxWidth(),
@@ -749,10 +770,10 @@ private fun PlanCard(
             .clip(RoundedCornerShape(14.dp))
             .border(
                 width = if (isCurrent) 1.5.dp else 1.dp,
-                color = if (isCurrent) Color(0xFF2E7D32).copy(alpha = 0.45f) else colors.border,
+                color = if (isCurrent) BillingGreen.copy(alpha = 0.45f) else colors.border,
                 shape = RoundedCornerShape(14.dp),
             )
-            .background(if (isCurrent) Color(0xFF2E7D32).copy(alpha = 0.1f) else colors.background)
+            .background(if (isCurrent) BillingGreen.copy(alpha = 0.1f) else colors.background)
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -766,20 +787,20 @@ private fun PlanCard(
             ) {
                 Text(
                     text = stringResource(plan.tier.displayNameRes) +
-                        if (plan.tier.profilePlanSymbol.isNotEmpty()) {
-                            " ${plan.tier.profilePlanSymbol}"
+                        if (plan.tier.titleStars.isNotEmpty()) {
+                            " ${plan.tier.titleStars}"
                         } else {
                             ""
                         },
                     fontWeight = FontWeight.SemiBold,
-                    fontSize = 16.sp,
+                    fontSize = 17.sp,
                     color = colors.text,
                 )
             }
             if (isCurrent) {
                 Text(
                     text = stringResource(R.string.billing_badge_current),
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
                     color = TabSelected,
                     modifier = Modifier
@@ -794,7 +815,7 @@ private fun PlanCard(
             Text(
                 text = stringResource(R.string.billing_price_no_charge),
                 fontWeight = FontWeight.Bold,
-                fontSize = 18.sp,
+                fontSize = 20.sp,
                 color = colors.text,
             )
         } else {
@@ -802,7 +823,7 @@ private fun PlanCard(
                 Text(
                     text = plan.formattedPrice(interval),
                     fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
+                    fontSize = 20.sp,
                     color = colors.text,
                 )
                 Spacer(modifier = Modifier.width(4.dp))
@@ -814,7 +835,7 @@ private fun PlanCard(
                             R.string.billing_per_month
                         },
                     ),
-                    fontSize = 13.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = colors.text,
                 )
@@ -828,16 +849,16 @@ private fun PlanCard(
                 Icon(
                     Icons.Filled.CheckCircle,
                     contentDescription = null,
-                    tint = Color(0xFF2E7D32),
-                    modifier = Modifier.size(14.dp),
+                    tint = BillingGreen,
+                    modifier = Modifier.size(20.dp),
                 )
-                Text(stringResource(featureRes), fontSize = 12.sp, color = colors.secondaryText)
+                Text(stringResource(featureRes), fontSize = 14.sp, color = colors.secondaryText)
             }
         }
         Text(
             text = actionTitle,
             fontWeight = FontWeight.SemiBold,
-            fontSize = 14.sp,
+            fontSize = 15.sp,
             color = buttonTextColor,
             textAlign = TextAlign.Center,
             maxLines = 1,
@@ -860,11 +881,7 @@ private fun InvoicesSection(
     val colors = LocalSpectRoomColors.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val dateFormat = remember {
-        SimpleDateFormat("d MMM yyyy", Locale.getDefault())
-    }
-    val planWord = stringResource(R.string.billing_invoice_title_plan)
-    val recent = state.recentInvoices()
+    val recent = state.recentAccountHistory()
 
     BillingCard {
         Row(
@@ -877,7 +894,7 @@ private fun InvoicesSection(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Icon(
-                    Icons.Filled.Description,
+                    Icons.Filled.History,
                     contentDescription = null,
                     tint = colors.text,
                     modifier = Modifier.size(20.dp),
@@ -885,7 +902,7 @@ private fun InvoicesSection(
                 Text(
                     text = stringResource(R.string.billing_section_invoices),
                     fontWeight = FontWeight.SemiBold,
-                    fontSize = 17.sp,
+                    fontSize = 18.sp,
                     color = colors.text,
                 )
             }
@@ -903,26 +920,7 @@ private fun InvoicesSection(
                                         BillingHistoryExport.writePdfFile(
                                             context = appContext,
                                             accountEmail = accountEmail,
-                                            invoices = recent,
-                                            title = appContext.getString(
-                                                R.string.billing_invoices_export_title,
-                                            ),
-                                            exportedAtTemplate = appContext.getString(
-                                                R.string.billing_invoices_export_exported_at,
-                                            ),
-                                            accountTemplate = appContext.getString(
-                                                R.string.billing_invoices_export_account,
-                                            ),
-                                            rangeNote = appContext.getString(
-                                                R.string.billing_invoices_export_range,
-                                            ),
-                                            emptyLabel = appContext.getString(
-                                                R.string.billing_invoices_empty,
-                                            ),
-                                            planWord = planWord,
-                                            intervalLabel = {
-                                                appContext.getString(it.interval.titleRes)
-                                            },
+                                            events = recent,
                                         )
                                     }
                                     val uri = FileProvider.getUriForFile(
@@ -934,7 +932,7 @@ private fun InvoicesSection(
                                 }.onFailure { error ->
                                     android.util.Log.e(
                                         "BillingHistoryExport",
-                                        "Failed to export billing history PDF",
+                                        "Failed to export account history PDF",
                                         error,
                                     )
                                     state.showToast(
@@ -964,7 +962,7 @@ private fun InvoicesSection(
                     )
                     Text(
                         text = stringResource(R.string.billing_invoices_export),
-                        fontSize = 12.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = if (recent.isEmpty()) colors.secondaryText else TabSelected,
                     )
@@ -973,30 +971,49 @@ private fun InvoicesSection(
         }
 
         if (recent.isEmpty()) {
-            Text(
-                text = stringResource(R.string.billing_invoices_empty),
-                fontSize = 14.sp,
-                color = colors.secondaryText,
-            )
-        } else {
-            val maxVisibleRows = 6
-            val visibleCount = minOf(recent.size, maxVisibleRows)
-            val rowHeight = 62.dp
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(rowHeight * visibleCount)
-                    .verticalScroll(rememberScrollState()),
+                    .padding(vertical = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                recent.forEachIndexed { index, invoice ->
-                    InvoiceRow(
-                        invoice = invoice,
-                        dateLabel = dateFormat.format(Date(invoice.dateMillis)),
-                        title = invoice.displayTitle(
-                            intervalLabel = stringResource(invoice.interval.titleRes),
-                            planWord = planWord,
-                        ),
-                    )
+                Icon(
+                    Icons.Outlined.Description,
+                    contentDescription = null,
+                    tint = colors.secondaryText.copy(alpha = 0.7f),
+                    modifier = Modifier.size(28.dp),
+                )
+                Text(
+                    text = stringResource(R.string.billing_invoices_empty),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = colors.secondaryText,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        } else {
+            val maxVisibleRows = 6
+            val canScroll = recent.size > maxVisibleRows
+            // Tall enough for date + title + vertical padding (Android text is larger than iOS 62pt).
+            val rowHeight = 70.dp
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (canScroll) {
+                            // Cap at 6 rows, then scroll the rest.
+                            Modifier
+                                .height(rowHeight * maxVisibleRows)
+                                .verticalScroll(rememberScrollState())
+                        } else {
+                            // Expand to fit every item fully (no clipping, no inner scroll).
+                            Modifier
+                        },
+                    ),
+            ) {
+                recent.forEachIndexed { index, event ->
+                    AccountHistoryRow(event = event)
                     if (index != recent.lastIndex) {
                         HorizontalDivider(
                             color = colors.border,
@@ -1010,12 +1027,9 @@ private fun InvoicesSection(
 }
 
 @Composable
-private fun InvoiceRow(
-    invoice: Invoice,
-    dateLabel: String,
-    title: String,
-) {
+private fun AccountHistoryRow(event: AccountHistoryEvent) {
     val colors = LocalSpectRoomColors.current
+    val context = LocalContext.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1027,21 +1041,23 @@ private fun InvoiceRow(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text(dateLabel, fontSize = 12.sp, color = colors.secondaryText)
+            Text(event.formattedDateTime(), fontSize = 13.sp, color = colors.secondaryText)
             Text(
-                text = title,
+                text = event.displayTitle(context),
                 fontWeight = FontWeight.SemiBold,
-                fontSize = 14.sp,
+                fontSize = 15.sp,
                 color = colors.text,
             )
         }
-        Text(
-            text = invoice.formattedAmount(),
-            fontWeight = FontWeight.Bold,
-            fontSize = 14.sp,
-            color = colors.text,
-            textAlign = TextAlign.End,
-        )
+        if (event.showsAmount) {
+            Text(
+                text = event.formattedAmount(),
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                color = colors.text,
+                textAlign = TextAlign.End,
+            )
+        }
     }
 }
 

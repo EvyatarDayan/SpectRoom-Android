@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.spectroom.R
@@ -89,7 +90,7 @@ fun VoiceRecordingIndicatorSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 180.dp, max = 230.dp)
+                .heightIn(min = 200.dp, max = 280.dp)
                 .padding(horizontal = 20.dp)
                 .padding(top = 12.dp, bottom = 8.dp),
         ) {
@@ -159,6 +160,15 @@ fun VoiceRecordingIndicatorSheet(
                     )
                 }
             }
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = stringResource(R.string.messages_voice_recording_max_duration),
+                color = colors.secondaryText,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }
@@ -300,5 +310,5 @@ fun VoiceRecordingPreviewSheet(
 
 private fun formatVoiceRecordingDuration(seconds: Double): String {
     val total = seconds.coerceAtLeast(0.0).toInt()
-    return "%d:%02d".format(total / 60, total % 60)
+    return "%02d:%02d".format(total / 60, total % 60)
 }

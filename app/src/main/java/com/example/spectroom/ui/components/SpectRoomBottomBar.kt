@@ -20,7 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChatBubble
+import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
@@ -47,14 +47,18 @@ import com.example.spectroom.ui.theme.TabSelected
 
 private val BarTopCorner = 15.dp
 private val BarHorizontalPadding = 15.dp
-private val BarTopPadding = 12.dp
+/** Match iOS CustomFooterMenu vertical breathing room above icons. */
+private val BarTopPadding = 18.dp
 private val CenterButtonSize = 56.dp
-private val CenterIconSize = 30.dp
+private val CenterIconSize = 34.dp
 private val CenterButtonLift = 28.dp
 private val CenterSlotWidth = 60.dp
+private val TabIconSize = 24.dp
+private val TabLabelSize = 12.sp
+private val TabIconLabelGap = 1.dp
 
-/** Tab bar body (icons + labels) — used to reserve list space above the menu. */
-val TabBarBodyHeight = 42.dp
+/** Tab bar body (top pad + icons + labels) — used to reserve list space above the menu. */
+val TabBarBodyHeight = 52.dp
 
 /** Main content bottom inset: tab bar body + center button protrusion above the bar. */
 val TabBarMainContentInset = TabBarBodyHeight + CenterButtonLift
@@ -187,14 +191,14 @@ private fun BottomTabItem(
             onClick = onClick,
         ),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+        verticalArrangement = Arrangement.spacedBy(TabIconLabelGap),
     ) {
         Box {
             Icon(
                 imageVector = tab.icon,
                 contentDescription = label,
                 tint = tint,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(TabIconSize),
             )
             if (badgeCount > 0) {
                 UnreadCountBadge(count = badgeCount)
@@ -203,15 +207,16 @@ private fun BottomTabItem(
         Text(
             text = label,
             color = tint,
-            fontSize = 11.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            fontSize = TabLabelSize,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            maxLines = 1,
         )
     }
 }
 
 private val MainTab.icon: ImageVector
     get() = when (this) {
-        MainTab.MESSAGES -> Icons.Filled.ChatBubble
+        MainTab.MESSAGES -> Icons.AutoMirrored.Filled.Message
         MainTab.MATCHES -> Icons.Filled.Favorite
         MainTab.HOME -> Icons.Filled.Favorite // unused — center uses profile card asset
         MainTab.PROFILE -> Icons.Filled.Person

@@ -5,6 +5,7 @@ import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
+import com.example.spectroom.data.model.VoiceMessageLimits
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.Dispatchers
@@ -47,6 +48,8 @@ class VoiceMessageRepository(
         mediaRecorder.setAudioSamplingRate(44100)
         mediaRecorder.setAudioEncodingBitRate(128_000)
         mediaRecorder.setOutputFile(file.absolutePath)
+        // Hard cap at 1 minute (iOS VoiceMessageLimits.maxDuration).
+        mediaRecorder.setMaxDuration(VoiceMessageLimits.MAX_DURATION_MILLIS)
         mediaRecorder.prepare()
         mediaRecorder.start()
         recorder = mediaRecorder

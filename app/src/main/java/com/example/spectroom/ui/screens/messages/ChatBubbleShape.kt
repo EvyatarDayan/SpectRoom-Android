@@ -7,11 +7,16 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
 
-/** WhatsApp-style chat bubble with a small tail on the bottom corner (iOS parity). */
+/**
+ * WhatsApp-style chat bubble with a small tail on the bottom corner.
+ * Radii/tail sizes are density-aware so they match iOS pt values (14 / 6).
+ */
 class ChatBubbleShape(
     private val isOutgoing: Boolean,
-    private val cornerRadius: Float = 14f,
+    private val cornerRadiusDp: Float = 14f,
+    private val tailDp: Float = 6f,
 ) : Shape {
     override fun createOutline(
         size: Size,
@@ -21,8 +26,11 @@ class ChatBubbleShape(
         val path = Path()
         val width = size.width
         val height = size.height
-        val r = cornerRadius
-        val tail = 6f
+        val r = with(density) { cornerRadiusDp.dp.toPx() }
+        val tail = with(density) { tailDp.dp.toPx() }
+        val tailInset = with(density) { 8.dp.toPx() }
+        val tipOffset = with(density) { 1.dp.toPx() }
+        val incomingTailLift = with(density) { 4.dp.toPx() }
 
         if (isOutgoing) {
             path.moveTo(r, 0f)
@@ -41,7 +49,7 @@ class ChatBubbleShape(
                 forceMoveTo = false,
             )
             path.quadraticTo(width - tail * 0.2f, height, width, height)
-            path.quadraticTo(width - 1f, height, width - tail - 8f, height)
+            path.quadraticTo(width - tipOffset, height, width - tail - tailInset, height)
             path.lineTo(r, height)
             path.arcTo(
                 rect = Rect(0f, height - r * 2f, r * 2f, height),
@@ -72,9 +80,9 @@ class ChatBubbleShape(
                 sweepAngleDegrees = 90f,
                 forceMoveTo = false,
             )
-            path.lineTo(tail + 8f, height)
-            path.quadraticTo(1f, height, 0f, height)
-            path.quadraticTo(tail * 0.2f, height, tail, height - r + 4f)
+            path.lineTo(tail + tailInset, height)
+            path.quadraticTo(tipOffset, height, 0f, height)
+            path.quadraticTo(tail * 0.2f, height, tail, height - r + incomingTailLift)
             path.lineTo(tail, r)
             path.arcTo(
                 rect = Rect(tail, 0f, tail + r * 2f, r * 2f),

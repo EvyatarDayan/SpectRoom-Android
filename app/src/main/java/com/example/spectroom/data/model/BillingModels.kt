@@ -3,9 +3,25 @@ package com.example.spectroom.data.model
 import androidx.annotation.StringRes
 import com.example.spectroom.R
 import java.math.BigDecimal
-import java.text.NumberFormat
-import java.util.Currency
+import java.text.DecimalFormat
+import java.text.DecimalFormatSymbols
 import java.util.Locale
+
+/** Unified billing price display: always `"9.99 USD"` (dot decimal, USD code). Matches iOS. */
+object BillingCurrency {
+    const val CODE = "USD"
+
+    private val amountFormatter = DecimalFormat("0.00", DecimalFormatSymbols(Locale.US)).apply {
+        isGroupingUsed = true
+        groupingSize = 3
+    }
+
+    fun format(amount: BigDecimal, currencyCode: String = CODE): String {
+        val number = amountFormatter.format(amount)
+        val resolved = currencyCode.trim().uppercase(Locale.US).ifEmpty { CODE }
+        return "$number $resolved"
+    }
+}
 
 enum class BillingInterval(
     @param:StringRes val titleRes: Int,
@@ -46,6 +62,8 @@ enum class PlanTier(
     /** Days between profile boosts. `null` means boost is not available (Free). */
     val profileBoostCooldownDays: Int?,
     val dailyMediaMessageLimit: Int,
+    /** Max chat video file size in bytes (picked original + upload). */
+    val maxVideoUploadBytes: Int,
     val profilePlanSymbol: String,
     val featureResIds: List<Int>,
 ) {
@@ -58,6 +76,7 @@ enum class PlanTier(
         showsFullMatchBreakdown = false,
         profileBoostCooldownDays = null,
         dailyMediaMessageLimit = 5,
+        maxVideoUploadBytes = 10 * 1024 * 1024,
         profilePlanSymbol = "",
         featureResIds = listOf(
             R.string.billing_feature_swipes_10,
@@ -65,6 +84,7 @@ enum class PlanTier(
             R.string.billing_feature_match_basic,
             R.string.billing_feature_boost_none,
             R.string.billing_feature_media_5,
+            R.string.billing_feature_video_10,
         ),
     ),
     PRO(
@@ -76,6 +96,7 @@ enum class PlanTier(
         showsFullMatchBreakdown = true,
         profileBoostCooldownDays = 14,
         dailyMediaMessageLimit = 20,
+        maxVideoUploadBytes = 20 * 1024 * 1024,
         profilePlanSymbol = "⭐️",
         featureResIds = listOf(
             R.string.billing_feature_swipes_15,
@@ -83,6 +104,7 @@ enum class PlanTier(
             R.string.billing_feature_match_full,
             R.string.billing_feature_boost_14,
             R.string.billing_feature_media_20,
+            R.string.billing_feature_video_20,
         ),
     ),
     PREMIUM(
@@ -94,6 +116,7 @@ enum class PlanTier(
         showsFullMatchBreakdown = true,
         profileBoostCooldownDays = 7,
         dailyMediaMessageLimit = 50,
+        maxVideoUploadBytes = 40 * 1024 * 1024,
         profilePlanSymbol = "👑",
         featureResIds = listOf(
             R.string.billing_feature_swipes_20,
@@ -101,8 +124,19 @@ enum class PlanTier(
             R.string.billing_feature_match_full,
             R.string.billing_feature_boost_7,
             R.string.billing_feature_media_50,
+            R.string.billing_feature_video_40,
         ),
     );
+
+    val maxVideoUploadMegabytes: Int
+        get() = maxVideoUploadBytes / (1024 * 1024)
+
+    /** Icon next to plan titles in Account & Billing (Free sprout, Pro star, Premium crown). */
+    val titleStars: String
+        get() = when (this) {
+            FREE -> "🌱"
+            PRO, PREMIUM -> profilePlanSymbol
+        }
 
     val rawValue: String
         get() = name.lowercase()
@@ -117,12 +151,23 @@ enum class PlanTier(
 
 enum class SubscriptionStatus(
     @param:StringRes val titleRes: Int,
+    /** Firestore / cross-platform raw value. */
+    val rawValue: String,
 ) {
-    ACTIVE(R.string.billing_status_active),
-    RENEWING(R.string.billing_status_renewing),
-    CANCELLED(R.string.billing_status_cancelled),
-    PAST_DUE(R.string.billing_status_past_due),
-    NONE(R.string.billing_status_none),
+    ACTIVE(R.string.billing_status_active, "active"),
+    RENEWING(R.string.billing_status_renewing, "renewing"),
+    CANCELLED(R.string.billing_status_cancelled, "cancelled"),
+    PAST_DUE(R.string.billing_status_past_due, "pastDue"),
+    NONE(R.string.billing_status_none, "none"),
+    ;
+
+    companion object {
+        fun fromRaw(raw: String?): SubscriptionStatus? {
+            if (raw.isNullOrBlank()) return null
+            return entries.firstOrNull { it.rawValue.equals(raw, ignoreCase = true) }
+                ?: entries.firstOrNull { it.name.equals(raw, ignoreCase = true) }
+        }
+    }
 }
 
 data class SubscriptionPlan(
@@ -136,14 +181,8 @@ data class SubscriptionPlan(
     fun price(forInterval: BillingInterval): BigDecimal =
         if (forInterval == BillingInterval.YEARLY) yearlyPrice else monthlyPrice
 
-    fun formattedPrice(forInterval: BillingInterval, locale: Locale = Locale.getDefault()): String {
-        val formatter = NumberFormat.getNumberInstance(locale).apply {
-            minimumFractionDigits = 2
-            maximumFractionDigits = 2
-        }
-        val amount = formatter.format(price(forInterval))
-        return "$amount $currencyCode"
-    }
+    fun formattedPrice(forInterval: BillingInterval): String =
+        BillingCurrency.format(price(forInterval), currencyCode)
 }
 
 data class CurrentSubscription(
@@ -199,46 +238,99 @@ data class NewCardDraft(
     val postalCode: String = "",
 )
 
-enum class InvoiceStatus(
+enum class AccountHistoryEventKind(
+    val rawValue: String,
     @param:StringRes val titleRes: Int,
 ) {
-    PAID(R.string.billing_invoice_status_paid),
-    REFUNDED(R.string.billing_invoice_status_refunded),
-    PENDING(R.string.billing_invoice_status_pending),
+    NEW_PLAN("newPlan", R.string.billing_history_event_new_plan),
+    CHANGE_PLAN("changePlan", R.string.billing_history_event_change_plan),
+    CANCEL_PLAN("cancelPlan", R.string.billing_history_event_cancel_plan),
+    AUTOMATIC_BILLING("automaticBilling", R.string.billing_history_event_automatic_billing),
+    ;
+
+    companion object {
+        fun fromRaw(raw: String?): AccountHistoryEventKind? =
+            entries.firstOrNull { it.rawValue.equals(raw, ignoreCase = true) }
+    }
 }
 
-data class Invoice(
-    val id: String,
-    val dateMillis: Long,
-    val description: String,
-    val planTier: PlanTier? = null,
-    val interval: BillingInterval = BillingInterval.MONTHLY,
-    val amount: BigDecimal,
-    val currencyCode: String,
-    val status: InvoiceStatus,
-    val pdfUrl: String? = null,
+enum class InvoiceStatus(
+    val rawValue: String,
+    @param:StringRes val titleRes: Int,
 ) {
-    fun formattedAmount(locale: Locale = Locale.getDefault()): String {
-        val formatter = NumberFormat.getCurrencyInstance(locale).apply {
-            currency = Currency.getInstance(currencyCode)
-        }
-        return formatter.format(amount)
-    }
+    PAID("paid", R.string.billing_invoice_status_paid),
+    REFUNDED("refunded", R.string.billing_invoice_status_refunded),
+    PENDING("pending", R.string.billing_invoice_status_pending),
+    ;
 
-    /** Plain title e.g. "Monthly pro plan" (matches iOS `displayTitle`). */
-    fun displayTitle(intervalLabel: String, planWord: String): String {
-        val planName = (planTier ?: PlanTier.FREE).rawValue
-        return "$intervalLabel $planName $planWord"
+    companion object {
+        fun fromRaw(raw: String?): InvoiceStatus? =
+            entries.firstOrNull { it.rawValue.equals(raw, ignoreCase = true) }
     }
 }
+
+/** Plan / billing activity shown under Account History (matches iOS `AccountHistoryEvent`). */
+data class AccountHistoryEvent(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val dateMillis: Long = System.currentTimeMillis(),
+    val kind: AccountHistoryEventKind,
+    val planTier: PlanTier? = null,
+    val interval: BillingInterval? = null,
+    val amount: BigDecimal? = null,
+    val currencyCode: String = "USD",
+    val status: InvoiceStatus? = null,
+) {
+    val showsAmount: Boolean
+        get() = kind == AccountHistoryEventKind.AUTOMATIC_BILLING && amount != null
+
+    fun planLabel(context: android.content.Context): String {
+        val tier = planTier ?: PlanTier.FREE
+        val tierName = context.getString(tier.displayNameRes)
+        val billingInterval = interval
+        return if (billingInterval != null && tier != PlanTier.FREE) {
+            "${context.getString(billingInterval.titleRes)} $tierName"
+        } else {
+            tierName
+        }
+    }
+
+    fun displayTitle(context: android.content.Context): String =
+        context.getString(kind.titleRes, planLabel(context))
+
+    fun formattedDateTime(): String = dateTimeFormatter.format(java.util.Date(dateMillis))
+
+    fun formattedAmount(): String {
+        val value = amount ?: return "—"
+        return BillingCurrency.format(value, currencyCode)
+    }
+
+    companion object {
+        private val dateTimeFormatter =
+            java.text.SimpleDateFormat("d MMM yyyy HH:mm", Locale.UK)
+    }
+}
+
+/** Migration alias — older call sites referred to invoices. */
+typealias Invoice = AccountHistoryEvent
 
 data class BillingSnapshot(
     val subscription: CurrentSubscription,
     val availablePlans: List<SubscriptionPlan>,
     val paymentMethods: List<PaymentMethod>,
-    val invoices: List<Invoice>,
+    val accountHistory: List<AccountHistoryEvent>,
     val applePayEnabled: Boolean,
     val googlePayEnabled: Boolean,
+) {
+    /** Backward-compatible alias used by older view code. */
+    val invoices: List<AccountHistoryEvent>
+        get() = accountHistory
+}
+
+/** Firestore billing fields observed live across devices. */
+data class RemoteBillingPlan(
+    val tier: PlanTier,
+    val interval: BillingInterval?,
+    val status: SubscriptionStatus? = null,
 )
 
 sealed class BillingServiceException(message: String) : Exception(message) {

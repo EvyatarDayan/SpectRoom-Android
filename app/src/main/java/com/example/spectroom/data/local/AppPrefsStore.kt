@@ -26,7 +26,7 @@ class AppPrefsStore(context: Context) {
         set(value) = prefs.edit().putInt(KEY_FAILED_SIGN_IN, value).apply()
 
     var languageCode: String
-        get() = prefs.getString(KEY_LANGUAGE, "en") ?: "en"
+        get() = prefs.getString(KEY_LANGUAGE, DEFAULT_LANGUAGE) ?: DEFAULT_LANGUAGE
         set(value) = prefs.edit().putString(KEY_LANGUAGE, value).apply()
 
     var notificationsEnabled: Boolean
@@ -144,6 +144,8 @@ class AppPrefsStore(context: Context) {
         private const val KEY_DONT_SHOW_WELCOME = "dontShowWelcomeAgain"
         private const val KEY_FAILED_SIGN_IN = "failedSignInAttempts"
         private const val KEY_LANGUAGE = "selectedLanguage"
+        /** Mirrors iOS `@AppStorage("selectedLanguage")` default. */
+        private const val DEFAULT_LANGUAGE = "sv"
         private const val KEY_NOTIFICATIONS = "notificationsEnabled"
         private const val KEY_SOUND = "soundEnabled"
         private const val KEY_PHOTO_WARNING_LEGACY = "dontShowPhotoShareWarning"
@@ -159,6 +161,6 @@ class AppPrefsStore(context: Context) {
 
         fun readLanguageCode(context: Context): String =
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getString(KEY_LANGUAGE, "en") ?: "en"
+                .getString(KEY_LANGUAGE, DEFAULT_LANGUAGE) ?: DEFAULT_LANGUAGE
     }
 }

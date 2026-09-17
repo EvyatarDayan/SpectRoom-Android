@@ -39,6 +39,8 @@ data class SpectRoomUser(
     val planTier: PlanTier = PlanTier.FREE,
     /** Billing cycle synced via Firestore (`monthly` / `yearly`). Null when unset / Free. */
     val billingInterval: BillingInterval? = null,
+    /** Subscription lifecycle synced via Firestore (`renewing` / `cancelled` / …). */
+    val subscriptionStatus: SubscriptionStatus? = null,
     val lastProfileBoostAtMillis: Long? = null,
     val boostedUntilMillis: Long? = null,
 )

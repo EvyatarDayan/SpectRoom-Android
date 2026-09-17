@@ -10,7 +10,9 @@ import com.example.spectroom.data.model.MessageType
 import com.example.spectroom.data.model.ModerationNotice
 import com.example.spectroom.data.model.PlanTier
 import com.example.spectroom.data.model.ProfileCard
+import com.example.spectroom.data.model.RemoteBillingPlan
 import com.example.spectroom.data.model.SpectRoomUser
+import com.example.spectroom.data.model.SubscriptionStatus
 import com.example.spectroom.data.model.SwipeType
 import com.example.spectroom.data.model.UserLocation
 import com.example.spectroom.data.model.UserProfileStatus
@@ -296,7 +298,7 @@ class AuthRepository(
     }
 
     /** Live updates when iOS (or another client) changes billing plan on the user document. */
-    fun observeBillingPlan(): Flow<Pair<PlanTier, BillingInterval?>> = callbackFlow {
+    fun observeBillingPlan(): Flow<RemoteBillingPlan> = callbackFlow {
         val uid = currentUid
         if (uid == null) {
             close()
@@ -310,12 +312,13 @@ class AuthRepository(
                 val interval = intervalRaw
                     ?.takeIf { it.isNotBlank() }
                     ?.let { BillingInterval.fromRaw(it) }
-                trySend(tier to interval)
+                val status = SubscriptionStatus.fromRaw(snapshot.getString("subscriptionStatus"))
+                trySend(RemoteBillingPlan(tier = tier, interval = interval, status = status))
             }
         awaitClose { registration.remove() }
     }
 
-    fun observePlanTier(): Flow<PlanTier> = observeBillingPlan().map { it.first }
+    fun observePlanTier(): Flow<PlanTier> = observeBillingPlan().map { it.tier }
 
     suspend fun saveUserProfile(user: SpectRoomUser): Result<SpectRoomUser> {
         val uid = currentUid ?: return Result.failure(IllegalStateException("Not signed in"))
@@ -361,14 +364,43 @@ class AuthRepository(
         }
     }
 
-    suspend fun updateBillingPlan(tier: PlanTier, interval: BillingInterval?) {
+    suspend fun updateBillingPlan(
+        tier: PlanTier,
+        interval: BillingInterval?,
+        status: SubscriptionStatus? = null,
+    ) {
         val uid = currentUid ?: return
         val data = linkedMapOf<String, Any>("planTier" to tier.rawValue)
         when {
             tier == PlanTier.FREE -> data["billingInterval"] = ""
             interval != null -> data["billingInterval"] = interval.rawValue
         }
+        val resolvedStatus = status ?: when {
+            tier == PlanTier.FREE -> SubscriptionStatus.NONE
+            else -> SubscriptionStatus.RENEWING
+        }
+        data["subscriptionStatus"] = resolvedStatus.rawValue
+        if (resolvedStatus != SubscriptionStatus.CANCELLED) {
+            data["cancelledAt"] = ""
+        }
         db.collection("users").document(uid).set(data, SetOptions.merge()).await()
+    }
+
+    suspend fun updateSubscriptionCancelled(
+        tier: PlanTier,
+        interval: BillingInterval,
+        cancelledAtMillis: Long = System.currentTimeMillis(),
+    ) {
+        val uid = currentUid ?: return
+        db.collection("users").document(uid).set(
+            mapOf(
+                "planTier" to tier.rawValue,
+                "billingInterval" to interval.rawValue,
+                "subscriptionStatus" to SubscriptionStatus.CANCELLED.rawValue,
+                "cancelledAt" to cancelledAtMillis / 1000.0,
+            ),
+            SetOptions.merge(),
+        ).await()
     }
 
     suspend fun updatePlanTier(tier: PlanTier) {
@@ -581,6 +613,7 @@ fun DocumentSnapshot.toSpectRoomUser(uid: String): SpectRoomUser {
         billingInterval = getString("billingInterval")
             ?.takeIf { it.isNotBlank() }
             ?.let { BillingInterval.fromRaw(it) },
+        subscriptionStatus = SubscriptionStatus.fromRaw(getString("subscriptionStatus")),
         lastProfileBoostAtMillis = (get("lastProfileBoostAt") as? Number)?.toDouble()?.let { (it * 1000).toLong() }
             ?: (get("lastProfileBoostAt") as? Number)?.toLong(),
         boostedUntilMillis = (get("boostedUntil") as? Number)?.toDouble()?.let { seconds ->
@@ -1257,6 +1290,36 @@ class MessageRepository(
         return messageId
     }
 
+    suspend fun sendVideoMessage(
+        recipientId: String,
+        videoUrl: String,
+        thumbnailUrl: String,
+        durationSeconds: Double,
+    ): String {
+        val normalizedRecipientId = recipientId.trim()
+        require(normalizedRecipientId.isNotEmpty()) { "Invalid recipient" }
+        require(!AdminSender.isAdmin(normalizedRecipientId)) { "Cannot reply to SpectRoom" }
+        val uid = auth.currentUser?.uid ?: error("Not signed in")
+        val messageId = UUID.randomUUID().toString()
+        val payload = hashMapOf<String, Any?>(
+            "id" to messageId,
+            "senderId" to uid,
+            "recipientId" to normalizedRecipientId,
+            "content" to videoUrl,
+            "type" to "video",
+            "thumbnailURL" to thumbnailUrl,
+            "videoDuration" to durationSeconds,
+            "createdAt" to Date().time / 1000.0,
+            "isRead" to false,
+            "readAt" to null,
+        )
+        db.collection("users").document(uid).collection("sentMessages").document(messageId)
+            .set(payload).await()
+        db.collection("users").document(normalizedRecipientId).collection("incomingMessages").document(messageId)
+            .set(payload).await()
+        return messageId
+    }
+
     private suspend fun sendMessage(recipientId: String, content: String, type: String): String {
         val normalizedRecipientId = recipientId.trim()
         require(normalizedRecipientId.isNotEmpty()) { "Invalid recipient" }
@@ -1556,6 +1619,8 @@ class MessageRepository(
             senderProfilePhotoURL = if (isOutgoing) myPhoto else otherPhoto,
             recipientProfilePhotoURL = if (isOutgoing) otherPhoto else myPhoto,
             voiceDurationSeconds = (data["voiceDuration"] as? Number)?.toDouble(),
+            thumbnailURL = data["thumbnailURL"] as? String,
+            videoDurationSeconds = (data["videoDuration"] as? Number)?.toDouble(),
         )
     }
 
@@ -1609,6 +1674,7 @@ class MessageRepository(
             val messageDate = Date((latest.createdAt * 1000).toLong())
             val preview = when {
                 latest.content.contains("voice_messages") -> "🎙️ Voice message"
+                latest.content.contains("message_videos") -> "🎥 Video"
                 latest.content.startsWith("http") && latest.content.contains("message_images") -> "📷 Photo"
                 latest.content.startsWith("http") && latest.content.contains("firebasestorage") -> "📷 Photo"
                 else -> latest.content.ifBlank { "No messages yet" }

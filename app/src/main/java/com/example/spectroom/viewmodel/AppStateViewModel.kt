@@ -23,7 +23,9 @@ import com.example.spectroom.data.model.AppLanguage
 import com.example.spectroom.data.model.ModerationFreezeDuration
 import com.example.spectroom.data.model.ModerationNotice
 import com.example.spectroom.data.model.BillingInterval
+import com.example.spectroom.data.model.CurrentSubscription
 import com.example.spectroom.data.model.PlanTier
+import com.example.spectroom.data.model.SubscriptionStatus
 import com.example.spectroom.data.model.SupportTopic
 import com.example.spectroom.data.model.UserReport
 import com.example.spectroom.R
@@ -42,12 +44,17 @@ import com.example.spectroom.data.model.MatchBreakdown
 import com.example.spectroom.data.model.MatchDisplay
 import com.example.spectroom.data.model.MessageDisplay
 import com.example.spectroom.data.model.MessageType
+import com.example.spectroom.data.model.ChatVideoProcessor
+import com.example.spectroom.data.model.ChatVideoValidationError
+import com.example.spectroom.data.model.PreparedChatVideo
 import com.example.spectroom.data.model.ProfileCard
 import com.example.spectroom.data.model.ProfileReportReason
 import com.example.spectroom.data.model.SpectRoomUser
 import com.example.spectroom.data.model.SwipeType
 import com.example.spectroom.data.model.UserProfileStatus
+import com.example.spectroom.data.model.VoiceMessageLimits
 import com.example.spectroom.data.remote.AddressSearchRepository
+import com.example.spectroom.ui.locale.AppLocale
 import com.example.spectroom.data.remote.AddressSuggestion
 import com.example.spectroom.data.remote.MfaAuthRepository
 import com.example.spectroom.data.remote.MfaSignInResult
@@ -74,6 +81,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Date
 import java.util.UUID
@@ -132,7 +140,7 @@ data class AppUiState(
     val viewingProfile: ProfileCard? = null,
     val isRecordingVoice: Boolean = false,
     val recordingDurationSeconds: Double = 0.0,
-    val languageCode: String = "en",
+    val languageCode: String = "sv",
     val notificationsEnabled: Boolean = true,
     val soundEnabled: Boolean = true,
     val showingCompleteProfileWelcome: Boolean = false,
@@ -182,8 +190,13 @@ data class SocialUiState(
     val isSendingMessage: Boolean = false,
     val isUploadingPhoto: Boolean = false,
     val chatImageLocalPreviews: Map<String, String> = emptyMap(),
+    val chatVideoLocalThumbnails: Map<String, String> = emptyMap(),
     val uploadingImageContentKey: String? = null,
+    val uploadingVideoContentKey: String? = null,
     val messageHistoryMatchIds: Set<String> = emptySet(),
+    val isProcessingVideo: Boolean = false,
+    val pendingPreparedVideo: PreparedChatVideo? = null,
+    val videoValidationError: ChatVideoValidationError? = null,
 )
 
 data class PhotoViewerState(
@@ -677,6 +690,11 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         if (tab == MainTab.HOME.index) {
             refreshDiscoverDailyLimitIfNeeded(reloadDeckIfUnlocked = true)
         }
+        // Mirror iOS SettingsView — keep Privacy & Safety counts in sync when opening Settings.
+        if (tab == MainTab.SETTINGS.index) {
+            refreshMyReports()
+            refreshBlockLists()
+        }
     }
 
     fun setOnline(isOnline: Boolean) {
@@ -800,20 +818,70 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
 
     fun onBillingPlanChanged(tier: PlanTier, interval: BillingInterval = BillingInterval.MONTHLY) {
         markLocalPlanWrite()
-        resolvePlanTier(tier, interval)
+        resolvePlanTier(tier, interval, status = if (tier == PlanTier.FREE) {
+            SubscriptionStatus.NONE
+        } else {
+            SubscriptionStatus.RENEWING
+        })
         viewModelScope.launch {
-            pushBillingPlanToFirestore(tier, interval)
+            pushBillingPlanToFirestore(
+                tier = tier,
+                interval = interval,
+                status = if (tier == PlanTier.FREE) {
+                    SubscriptionStatus.NONE
+                } else {
+                    SubscriptionStatus.RENEWING
+                },
+            )
             _uiState.update { state ->
                 val user = state.currentUser ?: return@update state
                 state.copy(
                     currentUser = user.copy(
                         planTier = tier,
                         billingInterval = interval.takeUnless { tier == PlanTier.FREE },
+                        subscriptionStatus = if (tier == PlanTier.FREE) {
+                            SubscriptionStatus.NONE
+                        } else {
+                            SubscriptionStatus.RENEWING
+                        },
                     ),
                 )
             }
             refreshDiscoverStateAfterBillingChange()
             ensureAutomaticProfileBoost()
+        }
+    }
+
+    fun onBillingSubscriptionCancelled(subscription: CurrentSubscription) {
+        markLocalPlanWrite()
+        resolvePlanTier(
+            tier = subscription.tier,
+            interval = subscription.interval,
+            status = SubscriptionStatus.CANCELLED,
+        )
+        viewModelScope.launch {
+            repeat(3) { attempt ->
+                val ok = runCatching {
+                    authRepository.updateSubscriptionCancelled(
+                        tier = subscription.tier,
+                        interval = subscription.interval,
+                        cancelledAtMillis = subscription.cancelledAtMillis
+                            ?: System.currentTimeMillis(),
+                    )
+                }.isSuccess
+                if (ok) return@launch
+                delay(400L * (attempt + 1))
+            }
+            _uiState.update { state ->
+                val user = state.currentUser ?: return@update state
+                state.copy(
+                    currentUser = user.copy(
+                        planTier = subscription.tier,
+                        billingInterval = subscription.interval,
+                        subscriptionStatus = SubscriptionStatus.CANCELLED,
+                    ),
+                )
+            }
         }
     }
 
@@ -889,6 +957,17 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
 
     fun showReportedProfiles() {
         _showReportedProfiles.value = true
+        refreshMyReports()
+    }
+
+    fun hideReportedProfiles() {
+        _showReportedProfiles.value = false
+        // Mirror iOS sheet onDismiss — keep Settings count in sync after viewing the list.
+        refreshMyReports()
+    }
+
+    /** Fetch the signed-in user's reports so Settings can show an up-to-date count (iOS onAppear). */
+    fun refreshMyReports() {
         viewModelScope.launch {
             _isLoadingReports.value = true
             _myReports.value = runCatching {
@@ -896,10 +975,6 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             }.getOrDefault(emptyList())
             _isLoadingReports.value = false
         }
-    }
-
-    fun hideReportedProfiles() {
-        _showReportedProfiles.value = false
     }
 
     private val _showAdminConsole = MutableStateFlow(false)
@@ -1009,9 +1084,20 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
 
     fun deleteAccount(password: String) {
         viewModelScope.launch {
+            val app = getApplication<Application>()
             _uiState.update { it.copy(isAuthLoading = true, authError = null) }
+            // Mirror iOS: any failed reauth in this flow is shown as wrong password.
+            val reauth = runCatching { authRepository.reauthenticate(password) }
+            if (reauth.isFailure) {
+                _uiState.update {
+                    it.copy(
+                        isAuthLoading = false,
+                        authError = app.getString(R.string.settings_delete_account_wrong_password),
+                    )
+                }
+                return@launch
+            }
             runCatching {
-                authRepository.reauthenticate(password)
                 authRepository.requestAccountDeletion()
             }.onSuccess {
                 stopRealtime()
@@ -1027,11 +1113,11 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                         selectedTab = 2,
                     )
                 }
-            }.onFailure { error ->
+            }.onFailure {
                 _uiState.update {
                     it.copy(
                         isAuthLoading = false,
-                        authError = error.message ?: "Could not delete account",
+                        authError = app.getString(R.string.settings_delete_account_error),
                     )
                 }
             }
@@ -1626,8 +1712,13 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         voiceRecordingTickerJob?.cancel()
         voiceRecordingTickerJob = viewModelScope.launch {
             while (isActive && voiceMessageRepository.isRecording) {
-                _uiState.update {
-                    it.copy(recordingDurationSeconds = voiceMessageRepository.currentRecordingDurationSeconds())
+                val duration = voiceMessageRepository.currentRecordingDurationSeconds()
+                    .coerceAtMost(VoiceMessageLimits.MAX_DURATION_SECONDS)
+                _uiState.update { it.copy(recordingDurationSeconds = duration) }
+                // Mirror iOS: auto-stop at 1 minute and open the preview sheet.
+                if (duration >= VoiceMessageLimits.MAX_DURATION_SECONDS - 0.05) {
+                    stopVoiceRecordingForPreview()
+                    break
                 }
                 delay(200)
             }
@@ -1652,14 +1743,15 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         val recorded = voiceMessageRepository.stopRecording()
         _uiState.update { it.copy(isRecordingVoice = false, recordingDurationSeconds = 0.0) }
         if (recorded == null) return
+        val duration = recorded.second.coerceAtMost(VoiceMessageLimits.MAX_DURATION_SECONDS)
         pendingVoiceFile = recorded.first
-        pendingVoiceDuration = recorded.second
+        pendingVoiceDuration = duration
         viewModelScope.launch {
             delay(350)
             _uiState.update {
                 it.copy(
                     hasPendingVoicePreview = true,
-                    pendingVoicePreviewDuration = recorded.second,
+                    pendingVoicePreviewDuration = duration,
                     pendingVoicePreviewPath = recorded.first.absolutePath,
                 )
             }
@@ -1973,12 +2065,13 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
-     * Apply [tier] (+ optional [interval]) to local cache + mock billing.
+     * Apply [tier] (+ optional [interval] / [status]) to local cache + mock billing.
      * Callers must pass the Firestore values when syncing from the cloud.
      */
     private fun resolvePlanTier(
         tier: PlanTier,
         interval: BillingInterval? = null,
+        status: SubscriptionStatus? = null,
     ): PlanTier {
         val resolvedInterval = when {
             tier == PlanTier.FREE -> BillingInterval.MONTHLY
@@ -1986,7 +2079,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             else -> planEntitlementsStore.currentBillingInterval
         }
         planEntitlementsStore.syncBillingPlan(tier, resolvedInterval)
-        MockBillingService.shared.alignWithPlanTier(tier, resolvedInterval)
+        MockBillingService.shared.alignWithPlanTier(tier, resolvedInterval, status)
         _currentPlanTier.value = tier
         return tier
     }
@@ -2001,10 +2094,11 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
     private suspend fun pushBillingPlanToFirestore(
         tier: PlanTier,
         interval: BillingInterval?,
+        status: SubscriptionStatus? = null,
     ) {
         repeat(3) { attempt ->
             val ok = runCatching {
-                authRepository.updateBillingPlan(tier, interval)
+                authRepository.updateBillingPlan(tier, interval, status)
             }.isSuccess
             if (ok) return
             delay(400L * (attempt + 1))
@@ -2016,11 +2110,16 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             tier = tier,
             interval = planEntitlementsStore.currentBillingInterval
                 .takeUnless { tier == PlanTier.FREE },
+            status = if (tier == PlanTier.FREE) {
+                SubscriptionStatus.NONE
+            } else {
+                MockBillingService.shared.currentSubscription.status
+            },
         )
     }
 
     /**
-     * Firestore is the source of truth for plan tier + billing interval.
+     * Firestore is the source of truth for plan tier + billing interval + subscription status.
      * Local mock billing / prefs are only a cache (except a short grace window after
      * a write from this device, to avoid a stale listener snapshot undoing it).
      */
@@ -2028,10 +2127,12 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         if (isWithinLocalPlanWriteGrace()) {
             val localTier = planEntitlementsStore.currentPlanTier
             val localInterval = planEntitlementsStore.currentBillingInterval
-            resolvePlanTier(localTier, localInterval)
+            val localStatus = MockBillingService.shared.currentSubscription.status
+            resolvePlanTier(localTier, localInterval, localStatus)
             return profile.copy(
                 planTier = localTier,
                 billingInterval = localInterval.takeUnless { localTier == PlanTier.FREE },
+                subscriptionStatus = localStatus,
             )
         }
 
@@ -2042,13 +2143,18 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             // Paid plan in DB without interval yet — converge on monthly and backfill.
             else -> BillingInterval.MONTHLY
         }
-        resolvePlanTier(remoteTier, remoteInterval)
+        val remoteStatus = when {
+            remoteTier == PlanTier.FREE -> SubscriptionStatus.NONE
+            profile.subscriptionStatus != null -> profile.subscriptionStatus
+            else -> SubscriptionStatus.RENEWING
+        }
+        resolvePlanTier(remoteTier, remoteInterval, remoteStatus)
 
         val needsIntervalBackfill =
             remoteTier != PlanTier.FREE && profile.billingInterval == null
         if (needsIntervalBackfill) {
             viewModelScope.launch {
-                pushBillingPlanToFirestore(remoteTier, remoteInterval)
+                pushBillingPlanToFirestore(remoteTier, remoteInterval, remoteStatus)
             }
         }
 
@@ -2061,6 +2167,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         return profile.copy(
             planTier = remoteTier,
             billingInterval = remoteInterval.takeUnless { remoteTier == PlanTier.FREE },
+            subscriptionStatus = remoteStatus,
         )
     }
 
@@ -2069,22 +2176,41 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             ?: authRepository.currentUid
 
     fun isMessagingBlocked(userId: String): Boolean {
+        return isUserBlocked(userId) || isBlockedByUser(userId)
+    }
+
+    /** True when *you* blocked this user. */
+    fun isUserBlocked(userId: String): Boolean {
         val user = _uiState.value.currentUser
         val social = _socialState.value
         return social.blockedUsers.any { it.id == userId } ||
-            social.blockedByUsers.any { it.id == userId } ||
-            user?.blockedUsers?.any { it.id == userId } == true ||
+            user?.blockedUsers?.any { it.id == userId } == true
+    }
+
+    /** True when *they* blocked you. */
+    fun isBlockedByUser(userId: String): Boolean {
+        val user = _uiState.value.currentUser
+        val social = _socialState.value
+        return social.blockedByUsers.any { it.id == userId } ||
             user?.blockedByUsers?.any { it.id == userId } == true
     }
+
+    fun blockedUser(userId: String): BlockedUser? =
+        _socialState.value.blockedUsers.firstOrNull { it.id == userId }
+            ?: _uiState.value.currentUser?.blockedUsers?.firstOrNull { it.id == userId }
 
     /** Matches visible in the list — excludes either-side blocks (parity with iOS). */
     fun visibleMatches(): List<MatchDisplay> =
         _socialState.value.matches.filter { !isMessagingBlocked(it.otherUser.userId) }
 
-    /** Conversations visible in the list — excludes either-side blocks (parity with iOS). */
+    /**
+     * Conversations visible in the list.
+     * Hide only when *they* blocked you. If *you* blocked them, keep the thread
+     * (blocked-row UI + read-only chat) — parity with iOS.
+     */
     fun visibleConversations(): List<ConversationDisplay> =
         _socialState.value.conversations
-            .filter { it.otherUserId.isNotBlank() && !isMessagingBlocked(it.otherUserId) }
+            .filter { it.otherUserId.isNotBlank() && !isBlockedByUser(it.otherUserId) }
             .distinctBy { it.id }
 
     fun searchMessageHistory(query: String) {
@@ -2198,7 +2324,12 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                     chatHasMoreOlder = false,
                     isLoadingChatMessages = true,
                     chatImageLocalPreviews = emptyMap(),
+                    chatVideoLocalThumbnails = emptyMap(),
                     uploadingImageContentKey = null,
+                    uploadingVideoContentKey = null,
+                    pendingPreparedVideo = null,
+                    isProcessingVideo = false,
+                    videoValidationError = null,
                 )
             }
             runCatching { authRepository.updateMessagesTabActive(true) }
@@ -2207,15 +2338,17 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             establishChatSoundBaseline()
             runCatching { messageRepository.markMessagesAsRead(partnerId) }
             refreshConversations()
-            val blocked = if (AdminSender.isAdmin(partnerId)) {
+            val theyBlockedMe = if (AdminSender.isAdmin(partnerId)) {
                 false
             } else {
                 runCatching { moderationRepository.isBlockedBy(partnerId) }.getOrDefault(false)
             }
+            val iBlockedThem = isUserBlocked(partnerId)
+            // Composer locked when either side blocked; alert only when *they* blocked you.
             _uiState.update {
                 it.copy(
-                    chatBlockedByPartner = blocked,
-                    showingBlockedUserAlert = blocked &&
+                    chatBlockedByPartner = theyBlockedMe || iBlockedThem,
+                    showingBlockedUserAlert = theyBlockedMe &&
                         partnerId == it.activeChatPartnerId &&
                         appPrefs.shouldShowBlockedAlert(partnerId),
                 )
@@ -2244,7 +2377,12 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 chatHasMoreOlder = false,
                 isLoadingChatMessages = false,
                 chatImageLocalPreviews = emptyMap(),
+                chatVideoLocalThumbnails = emptyMap(),
                 uploadingImageContentKey = null,
+                uploadingVideoContentKey = null,
+                pendingPreparedVideo = null,
+                isProcessingVideo = false,
+                videoValidationError = null,
             )
         }
         viewModelScope.launch {
@@ -2431,6 +2569,191 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun prepareChatVideo(uri: Uri) {
+        if (_uiState.value.chatBlockedByPartner || AdminSender.isAdmin(_uiState.value.activeChatPartnerId)) return
+        val accountKey = authRepository.accountKey
+        if (!mediaDailyLimitStore.canSend(accountKey)) {
+            _showMediaLimitOverlay.value = true
+            return
+        }
+        val plan = currentPlanTier()
+        _socialState.update {
+            it.copy(isProcessingVideo = true, videoValidationError = null, pendingPreparedVideo = null)
+        }
+        viewModelScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    ChatVideoProcessor.prepareForUpload(getApplication(), uri, plan)
+                }
+            }
+            result.fold(
+                onSuccess = { prepared ->
+                    _socialState.update {
+                        it.copy(isProcessingVideo = false, pendingPreparedVideo = prepared)
+                    }
+                },
+                onFailure = { error ->
+                    val validation = error as? ChatVideoValidationError
+                        ?: ChatVideoValidationError.ProcessingFailed
+                    _socialState.update {
+                        it.copy(isProcessingVideo = false, videoValidationError = validation)
+                    }
+                },
+            )
+        }
+    }
+
+    fun discardPreparedVideo() {
+        val prepared = _socialState.value.pendingPreparedVideo
+        prepared?.videoFile?.delete()
+        prepared?.thumbnailFile?.delete()
+        _socialState.update { it.copy(pendingPreparedVideo = null, isProcessingVideo = false) }
+    }
+
+    fun clearVideoValidationError() {
+        _socialState.update { it.copy(videoValidationError = null) }
+    }
+
+    fun videoValidationTitleRes(error: ChatVideoValidationError): Int = when (error) {
+        ChatVideoValidationError.UnsupportedFormat -> R.string.messages_video_error_format_title
+        is ChatVideoValidationError.FileTooLarge -> R.string.messages_video_error_size_title
+        ChatVideoValidationError.TooLong -> R.string.messages_video_error_duration_title
+        ChatVideoValidationError.ProcessingFailed -> R.string.messages_video_error_processing_title
+    }
+
+    fun videoValidationMessage(error: ChatVideoValidationError): String {
+        val context = AppLocale.localizedContext(
+            getApplication(),
+            _uiState.value.languageCode,
+        )
+        val plan = currentPlanTier()
+        return when (error) {
+            is ChatVideoValidationError.FileTooLarge -> {
+                if (plan == PlanTier.PREMIUM) {
+                    context.getString(R.string.messages_video_error_size_premium, error.maxMB)
+                } else {
+                    context.getString(
+                        R.string.messages_video_error_size,
+                        context.getString(plan.displayNameRes),
+                        error.maxMB,
+                    )
+                }
+            }
+            ChatVideoValidationError.UnsupportedFormat ->
+                context.getString(R.string.messages_video_error_format)
+            ChatVideoValidationError.TooLong ->
+                context.getString(R.string.messages_video_error_duration)
+            ChatVideoValidationError.ProcessingFailed ->
+                context.getString(R.string.messages_video_error_processing)
+        }
+    }
+
+    fun sendPreparedChatVideo() {
+        if (_uiState.value.chatBlockedByPartner || AdminSender.isAdmin(_uiState.value.activeChatPartnerId)) {
+            discardPreparedVideo()
+            return
+        }
+        val accountKey = authRepository.accountKey
+        if (!mediaDailyLimitStore.canSend(accountKey)) {
+            _showMediaLimitOverlay.value = true
+            return
+        }
+        val prepared = _socialState.value.pendingPreparedVideo ?: return
+        val partnerId = _uiState.value.activeChatPartnerId ?: return
+        val currentUserId = messagingUserId() ?: return
+        val partnerName = _uiState.value.activeChatPartnerName.orEmpty()
+        val myPhoto = _uiState.value.currentUser?.profilePhotoURL
+        val partnerPhoto = _uiState.value.activeChatPartnerPhoto
+        val pendingContent = "$PENDING_IMAGE_PREFIX${UUID.randomUUID()}"
+        val thumbPath = prepared.thumbnailFile.absolutePath
+        val optimistic = MessageDisplay(
+            id = pendingContent,
+            content = pendingContent,
+            messageType = MessageType.VIDEO,
+            senderName = "You",
+            recipientName = partnerName,
+            senderId = currentUserId,
+            recipientId = partnerId,
+            createdAt = Date(),
+            isRead = true,
+            senderProfilePhotoURL = myPhoto,
+            recipientProfilePhotoURL = partnerPhoto,
+            thumbnailURL = thumbPath,
+            videoDurationSeconds = prepared.durationSeconds,
+        )
+        _socialState.update { state ->
+            state.copy(
+                chatMessages = (state.chatMessages + optimistic).sortedBy { it.createdAt.time },
+                chatVideoLocalThumbnails = state.chatVideoLocalThumbnails + (pendingContent to thumbPath),
+                uploadingVideoContentKey = pendingContent,
+                pendingPreparedVideo = null,
+                isSendingMessage = true,
+            )
+        }
+        viewModelScope.launch {
+            val plan = currentPlanTier()
+            val result = runCatching {
+                val uploaded = photoStorageRepository.uploadMessageVideo(
+                    prepared = prepared,
+                    maxBytes = plan.maxVideoUploadBytes,
+                )
+                val messageId = messageRepository.sendVideoMessage(
+                    recipientId = partnerId,
+                    videoUrl = uploaded.videoURL,
+                    thumbnailUrl = uploaded.thumbnailURL,
+                    durationSeconds = prepared.durationSeconds,
+                )
+                Triple(uploaded.videoURL, uploaded.thumbnailURL, messageId)
+            }
+            prepared.videoFile.delete()
+            if (result.isSuccess) {
+                mediaDailyLimitStore.recordSend(accountKey)
+                val (videoUrl, thumbUrl, messageId) = result.getOrThrow()
+                _socialState.update { state ->
+                    val updatedMessages = state.chatMessages.map { message ->
+                        if (message.content == pendingContent) {
+                            message.copy(
+                                id = messageId,
+                                content = videoUrl,
+                                thumbnailURL = thumbUrl,
+                                videoDurationSeconds = prepared.durationSeconds,
+                            )
+                        } else {
+                            message
+                        }
+                    }
+                    val thumbs = state.chatVideoLocalThumbnails.toMutableMap()
+                    thumbs.remove(pendingContent)
+                    thumbs[videoUrl] = thumbPath
+                    thumbs[thumbUrl] = thumbPath
+                    state.copy(
+                        chatMessages = updatedMessages,
+                        chatVideoLocalThumbnails = thumbs,
+                        uploadingVideoContentKey = null,
+                        isSendingMessage = false,
+                    )
+                }
+                refreshConversations()
+            } else {
+                val error = result.exceptionOrNull()
+                val validation = when {
+                    error?.message?.contains("too large", ignoreCase = true) == true ->
+                        ChatVideoValidationError.FileTooLarge(plan.maxVideoUploadMegabytes)
+                    else -> null
+                }
+                _socialState.update { state ->
+                    state.copy(
+                        chatMessages = state.chatMessages.filterNot { it.content == pendingContent },
+                        chatVideoLocalThumbnails = state.chatVideoLocalThumbnails - pendingContent,
+                        uploadingVideoContentKey = null,
+                        isSendingMessage = false,
+                        videoValidationError = validation,
+                    )
+                }
+            }
+        }
+    }
+
     fun uploadProfilePhoto(uri: Uri) {
         viewModelScope.launch {
             _socialState.update { it.copy(isUploadingPhoto = true) }
@@ -2560,8 +2883,13 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         val profile = _uiState.value.pendingBlockProfile ?: return
         viewModelScope.launch {
             runCatching { moderationRepository.blockUser(profile.userId, profile.name) }
-            if (_uiState.value.activeChatPartnerId == profile.userId) closeChat()
             addBlockedUserLocally(profile.userId, profile.name)
+            // Stay in a read-only chat when you block from conversation (iOS parity).
+            if (_uiState.value.activeChatPartnerId == profile.userId) {
+                _uiState.update { it.copy(chatBlockedByPartner = true, pendingBlockProfile = null) }
+            } else {
+                _uiState.update { it.copy(pendingBlockProfile = null) }
+            }
             refreshBlockLists()
             val discover = _discoverState.value
             val isTopDiscoverCard = discover.profiles.getOrNull(discover.currentIndex)?.userId == profile.userId
@@ -2576,8 +2904,10 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
 
     fun confirmBlockAndReport() {
         val profile = _uiState.value.pendingBlockProfile ?: return
-        if (_uiState.value.activeChatPartnerId == profile.userId) closeChat()
         addBlockedUserLocally(profile.userId, profile.name)
+        if (_uiState.value.activeChatPartnerId == profile.userId) {
+            _uiState.update { it.copy(chatBlockedByPartner = true) }
+        }
         val discover = _discoverState.value
         val isTopDiscoverCard = discover.profiles.getOrNull(discover.currentIndex)?.userId == profile.userId
         if (isTopDiscoverCard) {
@@ -2699,13 +3029,33 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
 
     fun hideBlockedUsers() {
         _showBlockedUsers.value = false
+        // Keep Settings blocked-profiles count in sync after viewing/unblocking.
+        refreshBlockLists()
     }
 
     fun unblockUser(userId: String) {
         viewModelScope.launch {
             runCatching { moderationRepository.unblockUser(userId) }
+            _socialState.update { state ->
+                state.copy(blockedUsers = state.blockedUsers.filter { it.id != userId })
+            }
+            _uiState.update { state ->
+                val user = state.currentUser ?: return@update state
+                state.copy(
+                    currentUser = user.copy(
+                        blockedUsers = user.blockedUsers.filter { it.id != userId },
+                    ),
+                )
+            }
+            if (_uiState.value.activeChatPartnerId == userId) {
+                val theyBlockedMe = runCatching {
+                    moderationRepository.isBlockedBy(userId)
+                }.getOrDefault(false)
+                _uiState.update { it.copy(chatBlockedByPartner = theyBlockedMe) }
+            }
             refreshBlockLists()
             loadDiscoverDeck()
+            refreshConversations()
         }
     }
 
@@ -2786,6 +3136,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             photoUrls = listOfNotNull(target.imageURL) + target.photos,
             recentMessages = recent,
         )
+        refreshMyReports()
     }
 
     /**
@@ -3182,7 +3533,8 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         refreshConversations()
     }
 
-    private fun refreshBlockLists() {
+    /** Fetch blocked / blocked-by lists so Settings can show an up-to-date count. */
+    fun refreshBlockLists() {
         viewModelScope.launch {
             val blocked = runCatching { moderationRepository.fetchBlockedUsers() }
                 .getOrDefault(emptyList())
@@ -3356,31 +3708,40 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             }
         }
         val planTierJob = viewModelScope.launch {
-            authRepository.observeBillingPlan().collect { (remoteTier, remoteInterval) ->
+            authRepository.observeBillingPlan().collect { remote ->
                 // Don't let a stale snapshot undo a plan change just made on Android.
                 if (isWithinLocalPlanWriteGrace()) return@collect
                 val localTier = _currentPlanTier.value
-                val localInterval = MockBillingService.shared.currentSubscription.interval
-                val tierChanged = remoteTier != localTier
+                val localSubscription = MockBillingService.shared.currentSubscription
+                val localInterval = localSubscription.interval
+                val localStatus = localSubscription.status
+                val remoteStatus = when {
+                    remote.tier == PlanTier.FREE -> SubscriptionStatus.NONE
+                    remote.status != null -> remote.status
+                    else -> SubscriptionStatus.RENEWING
+                }
+                val tierChanged = remote.tier != localTier
                 val intervalChanged =
-                    remoteInterval != null &&
-                        remoteTier != PlanTier.FREE &&
-                        remoteInterval != localInterval
-                if (!tierChanged && !intervalChanged) return@collect
+                    remote.interval != null &&
+                        remote.tier != PlanTier.FREE &&
+                        remote.interval != localInterval
+                val statusChanged = remoteStatus != localStatus
+                if (!tierChanged && !intervalChanged && !statusChanged) return@collect
                 val intervalToApply = when {
-                    remoteTier == PlanTier.FREE -> BillingInterval.MONTHLY
-                    remoteInterval != null -> remoteInterval
+                    remote.tier == PlanTier.FREE -> BillingInterval.MONTHLY
+                    remote.interval != null -> remote.interval
                     else -> localInterval
                 }
-                resolvePlanTier(remoteTier, intervalToApply)
+                resolvePlanTier(remote.tier, intervalToApply, remoteStatus)
                 _uiState.update { state ->
                     val user = state.currentUser ?: return@update state
                     state.copy(
                         currentUser = user.copy(
-                            planTier = remoteTier,
+                            planTier = remote.tier,
                             billingInterval = intervalToApply.takeUnless {
-                                remoteTier == PlanTier.FREE
+                                remote.tier == PlanTier.FREE
                             },
+                            subscriptionStatus = remoteStatus,
                         ),
                     )
                 }

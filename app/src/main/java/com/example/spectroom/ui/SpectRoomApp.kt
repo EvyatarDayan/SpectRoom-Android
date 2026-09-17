@@ -37,11 +37,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.spectroom.NotificationDeepLink
 import com.example.spectroom.R
 import com.example.spectroom.data.model.AdminSender
+import com.example.spectroom.data.model.ChatVideoValidationError
 import com.example.spectroom.data.model.DiscoverDistanceOption
 import com.example.spectroom.data.model.EnergyLevel
 import com.example.spectroom.data.model.BillingInterval
 import com.example.spectroom.data.model.PlanTier
 import com.example.spectroom.data.model.ProfileCard
+import com.example.spectroom.data.remote.MockBillingService
 import com.example.spectroom.repository.ModerationRepository
 import com.example.spectroom.ui.components.AuthFlowPreferenceBar
 import com.example.spectroom.ui.components.PhotoViewerDialog
@@ -384,17 +386,30 @@ fun SpectRoomApp(
                                 pendingVoiceDuration = uiState.pendingVoicePreviewDuration,
                                 pendingVoicePath = uiState.pendingVoicePreviewPath,
                                 imageLocalPreviews = socialState.chatImageLocalPreviews,
+                                videoLocalThumbnails = socialState.chatVideoLocalThumbnails,
                                 uploadingImageContentKey = socialState.uploadingImageContentKey,
+                                uploadingVideoContentKey = socialState.uploadingVideoContentKey,
+                                isProcessingVideo = socialState.isProcessingVideo,
+                                hasPendingVideoPreview = socialState.pendingPreparedVideo != null,
+                                pendingPreparedVideoThumbPath = socialState.pendingPreparedVideo?.thumbnailFile?.absolutePath,
+                                pendingPreparedVideoDuration = socialState.pendingPreparedVideo?.durationSeconds ?: 0.0,
                                 onRegisterPhotoShareMediaTap = viewModel::registerPhotoShareMediaTapAndShouldShow,
                                 onBack = viewModel::closeChat,
                                 onSend = viewModel::sendChatMessage,
                                 onSendImage = viewModel::sendChatImage,
+                                onPrepareVideo = viewModel::prepareChatVideo,
+                                onSendPreparedVideo = viewModel::sendPreparedChatVideo,
+                                onDiscardPreparedVideo = viewModel::discardPreparedVideo,
                                 canSendMedia = viewModel.canSendChatMedia(),
                                 mediaRemaining = viewModel.mediaRemainingToday(),
                                 onMediaLimitReached = viewModel::showMediaLimitOverlay,
-                                onViewPlansFromMedia = {
-                                    viewModel.hideMediaLimitOverlay()
-                                    viewModel.showAccountBilling()
+                                onViewPlansFromMedia = if (currentPlanTier != PlanTier.PREMIUM) {
+                                    {
+                                        viewModel.hideMediaLimitOverlay()
+                                        viewModel.showAccountBilling()
+                                    }
+                                } else {
+                                    null
                                 },
                                 onStartRecording = viewModel::startVoiceRecording,
                                 onStopRecordingAndSend = viewModel::stopVoiceRecordingForPreview,
@@ -477,6 +492,8 @@ fun SpectRoomApp(
                                 isLoading = socialState.isLoadingMessages,
                                 hasMatches = viewModel.visibleMatches().isNotEmpty(),
                                 historyMatchIds = socialState.messageHistoryMatchIds,
+                                isUserBlocked = viewModel::isUserBlocked,
+                                blockedAtForUser = { userId -> viewModel.blockedUser(userId)?.blockedAt },
                                 onSearchQueryChange = viewModel::searchMessageHistory,
                                 onOpenConversation = { conversation ->
                                     viewModel.openChat(
@@ -485,6 +502,7 @@ fun SpectRoomApp(
                                         partnerPhoto = conversation.otherUserPhotoURL,
                                     )
                                 },
+                                onUnblockUser = viewModel::unblockUser,
                                 onViewMatches = { viewModel.setSelectedTab(1) },
                                 onExploreProfiles = { viewModel.setSelectedTab(2) },
                             )
@@ -518,12 +536,18 @@ fun SpectRoomApp(
                         }
                     },
                     settingsContent = {
+                        LaunchedEffect(Unit) {
+                            viewModel.refreshMyReports()
+                            viewModel.refreshBlockLists()
+                        }
                         SettingsScreen(
                             isDarkMode = uiState.isDarkMode,
                             languageCode = uiState.languageCode,
                             notificationsEnabled = uiState.notificationsEnabled,
                             blockedUsersCount = socialState.blockedUsers.size,
                             reportedProfilesCount = myReports.size,
+                            accountEmail = uiState.currentUser?.email.orEmpty(),
+                            planTier = currentPlanTier,
                             onDarkModeChange = viewModel::setDarkMode,
                             onLanguageClick = viewModel::showLanguagePicker,
                             onNotificationsChange = { enabled ->
@@ -602,12 +626,14 @@ fun SpectRoomApp(
                 profile = profile,
                 matchBreakdown = viewModel.matchBreakdownFor(profile),
                 showsFullMatchBreakdown = viewModel.showsFullMatchBreakdown(),
+                isBlocked = viewModel.isUserBlocked(profile.userId),
                 onDismiss = viewModel::closeProfileDetail,
                 onMessage = {
                     viewModel.closeProfileDetail()
                     viewModel.openChat(profile.userId, profile.name, profile.imageURL)
                 },
                 onBlock = { viewModel.requestBlock(profile) },
+                onUnblock = { viewModel.unblockUser(profile.userId) },
                 onReport = {
                     viewModel.closeProfileDetail()
                     viewModel.showReport(profile)
@@ -698,10 +724,13 @@ fun SpectRoomApp(
             AccountBillingSheet(
                 onDismiss = viewModel::hideAccountBilling,
                 onPlanChanged = viewModel::onBillingPlanChanged,
+                onSubscriptionCancelled = viewModel::onBillingSubscriptionCancelled,
                 accountEmail = uiState.currentUser?.email.orEmpty(),
                 seedPlanTier = currentPlanTier,
                 seedBillingInterval = uiState.currentUser?.billingInterval
                     ?: BillingInterval.MONTHLY,
+                seedSubscriptionStatus = uiState.currentUser?.subscriptionStatus
+                    ?: MockBillingService.shared.currentSubscription.status,
                 onShareExportedPdf = viewModel::shareExportedPdf,
             )
         }
@@ -715,6 +744,52 @@ fun SpectRoomApp(
                 onDismiss = viewModel::hideMediaLimitOverlay,
                 onViewPlans = {
                     viewModel.hideMediaLimitOverlay()
+                    viewModel.showAccountBilling()
+                },
+            )
+        }
+
+        val videoValidationError = socialState.videoValidationError
+        if (videoValidationError != null) {
+            val isSizeError = videoValidationError is ChatVideoValidationError.FileTooLarge
+            val isPremium = currentPlanTier == PlanTier.PREMIUM
+            val videoMessage = when (videoValidationError) {
+                is ChatVideoValidationError.FileTooLarge -> {
+                    if (isPremium) {
+                        stringResource(
+                            R.string.messages_video_error_size_premium,
+                            videoValidationError.maxMB,
+                        )
+                    } else {
+                        stringResource(
+                            R.string.messages_video_error_size,
+                            stringResource(currentPlanTier.displayNameRes),
+                            videoValidationError.maxMB,
+                        )
+                    }
+                }
+                ChatVideoValidationError.UnsupportedFormat ->
+                    stringResource(R.string.messages_video_error_format)
+                ChatVideoValidationError.TooLong ->
+                    stringResource(R.string.messages_video_error_duration)
+                ChatVideoValidationError.ProcessingFailed ->
+                    stringResource(R.string.messages_video_error_processing)
+            }
+            PlanLimitOverlay(
+                title = stringResource(viewModel.videoValidationTitleRes(videoValidationError)),
+                message = videoMessage,
+                showsPlansButton = isSizeError && !isPremium,
+                dismissButtonTitle = stringResource(
+                    if (isSizeError && !isPremium) {
+                        R.string.messages_media_limit_not_now
+                    } else {
+                        R.string.common_got_it
+                    },
+                ),
+                plansButtonTitle = stringResource(R.string.messages_media_limit_view_plans),
+                onDismiss = viewModel::clearVideoValidationError,
+                onViewPlans = {
+                    viewModel.clearVideoValidationError()
                     viewModel.showAccountBilling()
                 },
             )

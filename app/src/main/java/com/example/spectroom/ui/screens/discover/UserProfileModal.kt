@@ -65,6 +65,7 @@ import com.example.spectroom.ui.screens.profile.ProfilePhotoStyle
 import com.example.spectroom.ui.screens.profile.ProfilePlanPhotoBadge
 import com.example.spectroom.ui.screens.profile.ProfileCircleIconButton
 import com.example.spectroom.ui.screens.profile.ProfilePillButton
+import com.example.spectroom.ui.screens.settings.UnblockConfirmationOverlay
 import com.example.spectroom.ui.theme.EnergyFullySocial
 import com.example.spectroom.ui.theme.EnergyLow
 import com.example.spectroom.ui.theme.EnergyModerate
@@ -78,9 +79,11 @@ fun UserProfileModal(
     profile: ProfileCard,
     matchBreakdown: MatchBreakdown?,
     showsFullMatchBreakdown: Boolean = false,
+    isBlocked: Boolean = false,
     onDismiss: () -> Unit,
     onMessage: () -> Unit,
     onBlock: () -> Unit,
+    onUnblock: () -> Unit = {},
     onReport: () -> Unit,
     onOpenPhotos: (List<String>, Int) -> Unit = { _, _ -> },
     onRefresh: () -> Unit = {},
@@ -106,9 +109,11 @@ fun UserProfileModal(
     val matchColor = if (percentage > 49) LikeGreen else colors.secondaryText
     val firstName = profile.name.substringBefore(' ').ifBlank { profile.name }
     var showingMatchDetails by remember { mutableStateOf(false) }
+    var showingUnblockConfirmation by remember { mutableStateOf(false) }
 
     LaunchedEffect(profile.userId) {
         onRefresh()
+        showingUnblockConfirmation = false
     }
 
     Dialog(
@@ -127,13 +132,23 @@ fun UserProfileModal(
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                 ) {
-                    ProfileCircleIconButton(
-                        onClick = onBlock,
-                        icon = Icons.Filled.Block,
-                        contentDescription = stringResource(R.string.profile_block),
-                        iconTint = PassRed,
-                        modifier = Modifier.align(Alignment.CenterStart),
-                    )
+                    // Mirror iOS toolbar leading: Unblock text when blocked, else block icon.
+                    if (isBlocked) {
+                        Box(modifier = Modifier.align(Alignment.CenterStart)) {
+                            ProfilePillButton(
+                                text = stringResource(R.string.settings_blocked_users_unblock),
+                                onClick = { showingUnblockConfirmation = true },
+                            )
+                        }
+                    } else {
+                        ProfileCircleIconButton(
+                            onClick = onBlock,
+                            icon = Icons.Filled.Block,
+                            contentDescription = stringResource(R.string.profile_block),
+                            iconTint = PassRed,
+                            modifier = Modifier.align(Alignment.CenterStart),
+                        )
+                    }
                     Text(
                         text = profile.name.ifBlank { stringResource(R.string.profile_my_title) },
                         fontWeight = FontWeight.Bold,
@@ -144,7 +159,7 @@ fun UserProfileModal(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 72.dp)
+                            .padding(horizontal = 88.dp)
                             .align(Alignment.Center),
                     )
                     Box(modifier = Modifier.align(Alignment.CenterEnd)) {
@@ -241,6 +256,16 @@ fun UserProfileModal(
                     onUpgrade = {
                         showingMatchDetails = false
                         onUpgradePlans()
+                    },
+                )
+            }
+            if (showingUnblockConfirmation) {
+                UnblockConfirmationOverlay(
+                    firstName = firstName,
+                    onCancel = { showingUnblockConfirmation = false },
+                    onConfirm = {
+                        showingUnblockConfirmation = false
+                        onUnblock()
                     },
                 )
             }

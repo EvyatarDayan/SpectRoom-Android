@@ -44,6 +44,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.spectroom.R
 import com.example.spectroom.ui.theme.LikeRed
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
+import com.example.spectroom.ui.theme.TabSelected
 
 private enum class DeleteAccountStep {
     SURE,
@@ -170,7 +171,7 @@ fun DeleteAccountSheet(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
-                                Text(stringResource(R.string.settings_cancel), color = colors.text)
+                                Text(stringResource(R.string.settings_cancel), color = TabSelected)
                             }
                             VerticalDivider(modifier = Modifier.height(44.dp), color = colors.border)
                             TextButton(
@@ -200,7 +201,7 @@ fun DeleteAccountSheet(
                                 enabled = !isLoading,
                                 modifier = Modifier.weight(1f),
                             ) {
-                                Text(stringResource(R.string.settings_cancel), color = colors.text)
+                                Text(stringResource(R.string.settings_cancel), color = TabSelected)
                             }
                             VerticalDivider(modifier = Modifier.height(44.dp), color = colors.border)
                             TextButton(

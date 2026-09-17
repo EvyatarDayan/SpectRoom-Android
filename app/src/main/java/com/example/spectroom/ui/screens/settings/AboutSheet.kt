@@ -71,7 +71,14 @@ fun AboutSheet(
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp),
             ) {
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = stringResource(R.string.settings_about_app_version),
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 15.sp,
+                    color = colors.secondaryText,
+                )
+                Spacer(modifier = Modifier.height(24.dp))
 
                 Text(
                     text = stringResource(R.string.about_spectroom_title),

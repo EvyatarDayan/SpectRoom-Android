@@ -177,6 +177,11 @@ class LocalNotificationHelper(private val context: Context) {
                 lower.startsWith("http") && (lower.contains("voice") || lower.contains(".m4a")) ->
                     "🎤 Voice message"
                 lower.startsWith("http") && (
+                    lower.contains("message_videos") ||
+                        lower.contains(".mp4") ||
+                        lower.contains(".mov")
+                    ) -> "🎥 Video"
+                lower.startsWith("http") && (
                     lower.contains("image") ||
                         lower.contains(".jpg") ||
                         lower.contains(".jpeg") ||

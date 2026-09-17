@@ -61,6 +61,8 @@ import com.example.spectroom.data.model.AdminSender
 import com.example.spectroom.data.model.ConversationDisplay
 import com.example.spectroom.ui.components.TabBarBodyHeight
 import com.example.spectroom.ui.components.UnreadCountBadge
+import com.example.spectroom.ui.screens.settings.UnblockConfirmationOverlay
+import com.example.spectroom.ui.theme.LikeGreen
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
 import com.example.spectroom.ui.theme.TabSelected
 import java.text.SimpleDateFormat
@@ -84,13 +86,17 @@ fun MessagesScreen(
     isLoading: Boolean = false,
     hasMatches: Boolean = false,
     historyMatchIds: Set<String> = emptySet(),
+    isUserBlocked: (String) -> Boolean = { false },
+    blockedAtForUser: (String) -> Date? = { null },
     onSearchQueryChange: (String) -> Unit = {},
     onOpenConversation: (ConversationDisplay) -> Unit,
+    onUnblockUser: (String) -> Unit = {},
     onViewMatches: () -> Unit = {},
     onExploreProfiles: () -> Unit = {},
 ) {
     val colors = LocalSpectRoomColors.current
     var query by remember { mutableStateOf("") }
+    var pendingUnblock by remember { mutableStateOf<ConversationDisplay?>(null) }
     LaunchedEffect(query) { onSearchQueryChange(query) }
     val filtered = remember(conversations, query, historyMatchIds) {
         val needle = query.trim().lowercase()
@@ -150,7 +156,10 @@ fun MessagesScreen(
                             items(filtered, key = { it.id }) { conversation ->
                                 ConversationRow(
                                     conversation = conversation,
+                                    blockedByMe = isUserBlocked(conversation.otherUserId),
+                                    blockedAt = blockedAtForUser(conversation.otherUserId),
                                     onClick = { onOpenConversation(conversation) },
+                                    onRequestUnblock = { pendingUnblock = conversation },
                                 )
                             }
                         }
@@ -177,6 +186,19 @@ fun MessagesScreen(
                 fontWeight = FontWeight.Bold,
                 fontSize = 28.sp,
                 color = colors.text,
+            )
+        }
+
+        pendingUnblock?.let { conversation ->
+            UnblockConfirmationOverlay(
+                firstName = conversation.otherUserName
+                    .substringBefore(' ')
+                    .ifBlank { conversation.otherUserName },
+                onCancel = { pendingUnblock = null },
+                onConfirm = {
+                    onUnblockUser(conversation.otherUserId)
+                    pendingUnblock = null
+                },
             )
         }
     }
@@ -394,11 +416,73 @@ private fun MessagesNoSearchResultsView() {
 @Composable
 private fun ConversationRow(
     conversation: ConversationDisplay,
+    blockedByMe: Boolean,
+    blockedAt: Date?,
     onClick: () -> Unit,
+    onRequestUnblock: () -> Unit,
 ) {
     val colors = LocalSpectRoomColors.current
     val firstName = conversation.otherUserName.substringBefore(' ').ifBlank { conversation.otherUserName }
     val timeText = formatConversationListTime(conversation.lastMessageAt)
+    val blockedDateText = blockedAt?.let { at ->
+        stringResource(
+            R.string.settings_blocked_users_since,
+            java.text.DateFormat.getDateTimeInstance(
+                java.text.DateFormat.MEDIUM,
+                java.text.DateFormat.SHORT,
+            ).format(at),
+        )
+    } ?: stringResource(R.string.settings_blocked_users_no_date)
+
+    if (blockedByMe) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(colors.card)
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClick = onClick),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                ConversationAvatar(conversation = conversation, firstName = firstName)
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = conversation.otherUserName,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 17.sp,
+                        color = colors.text,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = blockedDateText,
+                        color = colors.secondaryText,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            Text(
+                text = stringResource(R.string.settings_blocked_users_unblock),
+                color = LikeGreen,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 15.sp,
+                modifier = Modifier.clickable(onClick = onRequestUnblock),
+            )
+        }
+        return
+    }
 
     Row(
         modifier = Modifier
@@ -411,66 +495,7 @@ private fun ConversationRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Box(modifier = Modifier.size(50.dp)) {
-            if (AdminSender.isAdmin(conversation.otherUserId)) {
-                Box(
-                    modifier = Modifier
-                        .size(50.dp)
-                        .clip(CircleShape)
-                        .border(1.dp, Color.Gray.copy(alpha = 0.3f), CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Image(
-                        painter = painterResource(AdminSender.photoRes),
-                        contentDescription = conversation.otherUserName,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .size(50.dp)
-                            .clip(CircleShape),
-                    )
-                }
-            } else if (conversation.otherUserPhotoURL.isNullOrBlank()) {
-                Box(
-                    modifier = Modifier
-                        .size(50.dp)
-                        .clip(CircleShape)
-                        .background(Color.Gray.copy(alpha = 0.1f))
-                        .border(1.dp, Color.Gray.copy(alpha = 0.3f), CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(TabSelected.copy(0.2f)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = firstName.take(1).uppercase(),
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 20.sp,
-                            color = TabSelected,
-                        )
-                    }
-                }
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(50.dp)
-                        .clip(CircleShape)
-                        .background(Color.Gray.copy(alpha = 0.1f))
-                        .border(1.dp, Color.Gray.copy(alpha = 0.3f), CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    AsyncImage(
-                        model = conversation.otherUserPhotoURL,
-                        contentDescription = conversation.otherUserName,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape),
-                    )
-                }
-            }
+            ConversationAvatar(conversation = conversation, firstName = firstName)
             if (conversation.unreadCount > 0) {
                 UnreadCountBadge(count = conversation.unreadCount)
             }
@@ -502,6 +527,73 @@ private fun ConversationRow(
             color = colors.text.copy(alpha = 0.75f),
             fontSize = 15.sp,
         )
+    }
+}
+
+@Composable
+private fun ConversationAvatar(
+    conversation: ConversationDisplay,
+    firstName: String,
+) {
+    if (AdminSender.isAdmin(conversation.otherUserId)) {
+        Box(
+            modifier = Modifier
+                .size(50.dp)
+                .clip(CircleShape)
+                .border(1.dp, Color.Gray.copy(alpha = 0.3f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Image(
+                painter = painterResource(AdminSender.photoRes),
+                contentDescription = conversation.otherUserName,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(50.dp)
+                    .clip(CircleShape),
+            )
+        }
+    } else if (conversation.otherUserPhotoURL.isNullOrBlank()) {
+        Box(
+            modifier = Modifier
+                .size(50.dp)
+                .clip(CircleShape)
+                .background(Color.Gray.copy(alpha = 0.1f))
+                .border(1.dp, Color.Gray.copy(alpha = 0.3f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(TabSelected.copy(0.2f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = firstName.take(1).uppercase(),
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 20.sp,
+                    color = TabSelected,
+                )
+            }
+        }
+    } else {
+        Box(
+            modifier = Modifier
+                .size(50.dp)
+                .clip(CircleShape)
+                .background(Color.Gray.copy(alpha = 0.1f))
+                .border(1.dp, Color.Gray.copy(alpha = 0.3f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            AsyncImage(
+                model = conversation.otherUserPhotoURL,
+                contentDescription = conversation.otherUserName,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape),
+            )
+        }
     }
 }
 

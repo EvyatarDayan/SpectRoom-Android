@@ -16,6 +16,7 @@ import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -55,6 +56,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -65,6 +67,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
@@ -74,19 +77,21 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import coil3.compose.AsyncImage
 import com.example.spectroom.R
 import com.example.spectroom.data.model.AdminSender
+import com.example.spectroom.data.model.ChatImageLimits
 import com.example.spectroom.data.model.MessageDisplay
 import com.example.spectroom.data.model.MessageType
 import com.example.spectroom.ui.theme.ChatBubbleText
@@ -121,15 +126,25 @@ fun ChatScreen(
     pendingVoiceDuration: Double = 0.0,
     pendingVoicePath: String? = null,
     imageLocalPreviews: Map<String, String> = emptyMap(),
+    videoLocalThumbnails: Map<String, String> = emptyMap(),
     uploadingImageContentKey: String? = null,
+    uploadingVideoContentKey: String? = null,
+    isProcessingVideo: Boolean = false,
+    pendingPreparedVideoThumbPath: String? = null,
+    pendingPreparedVideoDuration: Double = 0.0,
+    hasPendingVideoPreview: Boolean = false,
     onRegisterPhotoShareMediaTap: () -> Boolean = { false },
     onBack: () -> Unit,
     onSend: (String) -> Unit,
     onSendImage: (Uri) -> Unit = {},
+    onPrepareVideo: (Uri) -> Unit = {},
+    onSendPreparedVideo: () -> Unit = {},
+    onDiscardPreparedVideo: () -> Unit = {},
+    onOpenVideo: (String) -> Unit = {},
     canSendMedia: Boolean = true,
     mediaRemaining: Int = 0,
     onMediaLimitReached: () -> Unit = {},
-    onViewPlansFromMedia: () -> Unit = {},
+    onViewPlansFromMedia: (() -> Unit)? = null,
     onStartRecording: () -> Unit = {},
     onStopRecordingAndSend: () -> Unit = {},
     onCancelRecording: () -> Unit = {},
@@ -149,17 +164,32 @@ fun ChatScreen(
     var draft by remember { mutableStateOf("") }
     var showQuickMessages by remember { mutableStateOf(false) }
     var pendingImageUri by remember { mutableStateOf<Uri?>(null) }
+    var showImageTooLargeAlert by remember { mutableStateOf(false) }
     var pendingScrollPreserve by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     val listState = rememberLazyListState()
-    val imagePicker = rememberLauncherForActivityResult(
+    val mediaPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
-    ) { uri -> uri?.let { pendingImageUri = it } }
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val mime = context.contentResolver.getType(uri)?.lowercase().orEmpty()
+        if (mime.startsWith("video/")) {
+            onPrepareVideo(uri)
+            return@rememberLauncherForActivityResult
+        }
+        when (ChatImageLimits.validateOriginal(context, uri)) {
+            ChatImageLimits.ValidationResult.TooLarge -> showImageTooLargeAlert = true
+            ChatImageLimits.ValidationResult.Ok,
+            ChatImageLimits.ValidationResult.Unavailable,
+            -> pendingImageUri = uri
+        }
+    }
     val micPermission = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted -> if (granted) onStartRecording() }
     var showPhotoWarning by remember { mutableStateOf(false) }
     var pendingMediaAfterWarning by remember { mutableStateOf<PendingMediaAfterWarning?>(null) }
     var showMicLongPressTip by remember { mutableStateOf(false) }
+    var playingVideoUrl by remember { mutableStateOf<String?>(null) }
     var expandedLongMessageIds by remember { mutableStateOf(setOf<String>()) }
     var pinToBottomOnOpen by remember(partnerName) { mutableStateOf(true) }
     var previousTailMessageId by remember(partnerName) { mutableStateOf<String?>(null) }
@@ -178,17 +208,17 @@ fun ChatScreen(
         if (granted) onStartRecording() else micPermission.launch(Manifest.permission.RECORD_AUDIO)
     }
 
-    fun requestSendImage() {
+    fun requestSendMedia() {
         if (!canSendMedia) {
             onMediaLimitReached()
             return
         }
         if (onRegisterPhotoShareMediaTap()) {
-            pendingMediaAfterWarning = PendingMediaAfterWarning.Photo
+            pendingMediaAfterWarning = PendingMediaAfterWarning.Media
             showPhotoWarning = true
         } else {
-            imagePicker.launch(
-                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+            mediaPicker.launch(
+                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo),
             )
         }
     }
@@ -318,18 +348,23 @@ fun ChatScreen(
                     }
                     val outgoing = message.senderId == currentUserId
                     val localImageUri = imageLocalPreviews[message.content]
-                    val isImageUploading = message.content == uploadingImageContentKey
+                    val localVideoThumb = videoLocalThumbnails[message.content]
+                        ?: message.thumbnailURL
+                    val isMediaUploading = message.content == uploadingImageContentKey ||
+                        message.content == uploadingVideoContentKey
                     val isLastMessage = message.id == messages.lastOrNull()?.id
                     ChatMessageRow(
                         message = message,
                         outgoing = outgoing,
                         localImageUri = localImageUri,
-                        isImageUploading = isImageUploading,
+                        localVideoThumbnail = localVideoThumb,
+                        isMediaUploading = isMediaUploading,
                         expandedLongMessageIds = expandedLongMessageIds,
                         onExpandLongMessage = { id ->
                             expandedLongMessageIds = expandedLongMessageIds + id
                         },
                         onOpenImage = onOpenImage,
+                        onOpenVideo = { playingVideoUrl = it },
                         onIncomingImageDisplayed = onIncomingImageDisplayed,
                         onContentLayout = if (isLastMessage) {
                             { stickToBottomTrigger++ }
@@ -345,15 +380,9 @@ fun ChatScreen(
             }
         }
 
-        if (composerLocked) {
+        if (isAdminThread && composerLocked) {
             Text(
-                text = stringResource(
-                    if (isAdminThread) {
-                        R.string.messages_composer_admin
-                    } else {
-                        R.string.messages_composer_blocked
-                    },
-                ),
+                text = stringResource(R.string.messages_composer_admin),
                 color = colors.secondaryText,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -363,19 +392,32 @@ fun ChatScreen(
                 textAlign = TextAlign.Center,
             )
         } else {
-            ChatComposerBar(
-                draft = draft,
-                onDraftChange = { draft = it },
-                isSending = isSending,
-                isRecording = isRecording,
-                onSend = {
-                    onSend(draft)
-                    draft = ""
-                },
-                onAttachImage = { requestSendImage() },
-                onRequestStartRecording = { requestStartRecording() },
-                onShortMicTap = { showMicLongPressTip = true },
-            )
+            // Keep composer visible when blocked — only disable send/media (iOS parity).
+            Box(
+                modifier = Modifier.alpha(if (composerLocked || isLoadingMessages) 0.55f else 1f),
+            ) {
+                ChatComposerBar(
+                    draft = draft,
+                    onDraftChange = { if (!composerLocked) draft = it },
+                    isSending = isSending,
+                    isRecording = isRecording,
+                    enabled = !composerLocked && !isLoadingMessages,
+                    onSend = {
+                        if (composerLocked) return@ChatComposerBar
+                        onSend(draft)
+                        draft = ""
+                    },
+                    onAttachImage = {
+                        if (!composerLocked) requestSendMedia()
+                    },
+                    onRequestStartRecording = {
+                        if (!composerLocked) requestStartRecording()
+                    },
+                    onShortMicTap = {
+                        if (!composerLocked) showMicLongPressTip = true
+                    },
+                )
+            }
         }
     }
 
@@ -386,8 +428,8 @@ fun ChatScreen(
                 pendingMediaAfterWarning = null
                 showPhotoWarning = false
                 when (action) {
-                    PendingMediaAfterWarning.Photo -> imagePicker.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                    PendingMediaAfterWarning.Media -> mediaPicker.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo),
                     )
                     PendingMediaAfterWarning.Voice -> startRecordingAfterWarning()
                     null -> Unit
@@ -402,6 +444,10 @@ fun ChatScreen(
 
     if (showMicLongPressTip) {
         VoiceLongPressTipOverlay(onDismiss = { showMicLongPressTip = false })
+    }
+
+    if (showImageTooLargeAlert) {
+        ImageFileSizeTooLargeOverlay(onDismiss = { showImageTooLargeAlert = false })
     }
 
     if (showQuickMessages) {
@@ -445,6 +491,44 @@ fun ChatScreen(
             onUpgrade = onViewPlansFromMedia,
             onSend = onSendPendingVoice,
             onDiscard = onDiscardPendingVoice,
+        )
+    }
+
+    if (hasPendingVideoPreview) {
+        VideoPreviewReadySheet(
+            thumbnailModel = pendingPreparedVideoThumbPath,
+            durationSeconds = pendingPreparedVideoDuration,
+            isSending = isSending,
+            mediaRemaining = mediaRemaining,
+            onUpgrade = onViewPlansFromMedia,
+            onSend = onSendPreparedVideo,
+            onDiscard = onDiscardPreparedVideo,
+        )
+    }
+
+    if (isProcessingVideo) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.35f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator(color = Color.White)
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = stringResource(R.string.messages_video_processing),
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+
+    playingVideoUrl?.let { url ->
+        ChatVideoPlayerDialog(
+            videoUrl = url,
+            onDismiss = { playingVideoUrl = null },
         )
     }
 }
@@ -764,23 +848,7 @@ private fun ChatDateSeparator(title: String) {
 }
 
 private val CHAT_IMAGE_BUBBLE_SIZE = 150.dp
-
-@Composable
-private fun ChatImageLoadingPlaceholder() {
-    Box(
-        modifier = Modifier
-            .size(CHAT_IMAGE_BUBBLE_SIZE)
-            .clip(RoundedCornerShape(10.dp))
-            .background(Color.Gray.copy(alpha = 0.12f)),
-        contentAlignment = Alignment.Center,
-    ) {
-        CircularProgressIndicator(
-            modifier = Modifier.size(28.dp),
-            color = TabSelected,
-            strokeWidth = 2.5.dp,
-        )
-    }
-}
+private val CHAT_IMAGE_CORNER = 12.dp
 
 @Composable
 private fun ChatImageMessageContent(
@@ -794,7 +862,9 @@ private fun ChatImageMessageContent(
     onContentLayout: (() -> Unit)?,
     onIncomingImageDisplayed: (String) -> Unit,
 ) {
+    val density = LocalDensity.current
     var isReady by remember(imageModel) { mutableStateOf(false) }
+    var aspectRatio by remember(imageModel) { mutableFloatStateOf(1f) }
     var hasNotifiedIncoming by remember(messageKey) { mutableStateOf(false) }
 
     fun notifyIncomingIfNeeded() {
@@ -803,10 +873,21 @@ private fun ChatImageMessageContent(
         onIncomingImageDisplayed(messageKey)
     }
 
+    // Mirror iOS maxWidth/maxHeight 150 with .fit — frame hugs the photo's aspect ratio.
+    val ratio = aspectRatio.coerceIn(0.4f, 2.5f)
+    val maxPx = with(density) { CHAT_IMAGE_BUBBLE_SIZE.toPx() }
+    val (widthDp, heightDp) = with(density) {
+        if (ratio >= 1f) {
+            CHAT_IMAGE_BUBBLE_SIZE to (maxPx / ratio).toDp()
+        } else {
+            (maxPx * ratio).toDp() to CHAT_IMAGE_BUBBLE_SIZE
+        }
+    }
+
     Box(
         modifier = Modifier
-            .size(CHAT_IMAGE_BUBBLE_SIZE)
-            .clip(RoundedCornerShape(10.dp))
+            .size(width = widthDp, height = heightDp)
+            .clip(RoundedCornerShape(CHAT_IMAGE_CORNER))
             .then(
                 if (canOpenImage) {
                     Modifier.clickable { onOpenImage(remoteContent) }
@@ -817,19 +898,34 @@ private fun ChatImageMessageContent(
         contentAlignment = Alignment.Center,
     ) {
         if (!isReady) {
-            ChatImageLoadingPlaceholder()
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Color.Gray.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(28.dp),
+                    color = TabSelected,
+                    strokeWidth = 2.5.dp,
+                )
+            }
         }
         AsyncImage(
             model = imageModel,
             contentDescription = "Image message",
-            contentScale = ContentScale.Fit,
+            contentScale = ContentScale.FillBounds,
             modifier = Modifier
-                .size(CHAT_IMAGE_BUBBLE_SIZE)
+                .matchParentSize()
                 .alpha(if (isReady) 1f else 0f)
                 .onSizeChanged { size ->
                     if (isReady && size.height > 0) onContentLayout?.invoke()
                 },
-            onSuccess = {
+            onSuccess = { state ->
+                val size = state.painter.intrinsicSize
+                if (size.isSpecified && size.width > 0f && size.height > 0f) {
+                    aspectRatio = size.width / size.height
+                }
                 isReady = true
                 notifyIncomingIfNeeded()
                 onContentLayout?.invoke()
@@ -842,7 +938,75 @@ private fun ChatImageMessageContent(
             Box(
                 modifier = Modifier
                     .matchParentSize()
-                    .background(Color.Black.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
+                    .background(Color.Black.copy(alpha = 0.35f), RoundedCornerShape(CHAT_IMAGE_CORNER)),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(28.dp),
+                    color = Color.White,
+                    strokeWidth = 2.5.dp,
+                )
+            }
+        }
+    }
+}
+
+private val CHAT_VIDEO_BUBBLE_SIZE = 150.dp
+
+@Composable
+private fun ChatVideoBubbleContent(
+    thumbnailModel: Any?,
+    durationSeconds: Double?,
+    isUploading: Boolean,
+) {
+    Box(
+        modifier = Modifier
+            .size(CHAT_VIDEO_BUBBLE_SIZE)
+            .clip(RoundedCornerShape(CHAT_IMAGE_CORNER))
+            .background(Color.Black.copy(alpha = 0.2f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        AsyncImage(
+            model = thumbnailModel,
+            contentDescription = "Video message",
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.matchParentSize(),
+        )
+        if (!isUploading) {
+            Icon(
+                imageVector = Icons.Filled.PlayArrow,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.95f),
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.35f))
+                    .padding(8.dp),
+            )
+        }
+        if (durationSeconds != null) {
+            Text(
+                text = formatVideoDuration(durationSeconds),
+                color = Color.White,
+                style = TextStyle(
+                    fontSize = 11.sp,
+                    lineHeight = 11.sp,
+                    fontWeight = FontWeight.Normal,
+                    platformStyle = PlatformTextStyle(includeFontPadding = false),
+                ),
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(6.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.45f))
+                    .padding(horizontal = 6.dp, vertical = 1.dp),
+            )
+        }
+        if (isUploading) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Color.Black.copy(alpha = 0.35f)),
                 contentAlignment = Alignment.Center,
             ) {
                 CircularProgressIndicator(
@@ -860,10 +1024,12 @@ private fun ChatMessageRow(
     message: MessageDisplay,
     outgoing: Boolean,
     localImageUri: String? = null,
-    isImageUploading: Boolean = false,
+    localVideoThumbnail: String? = null,
+    isMediaUploading: Boolean = false,
     expandedLongMessageIds: Set<String>,
     onExpandLongMessage: (String) -> Unit,
     onOpenImage: (String) -> Unit,
+    onOpenVideo: (String) -> Unit = {},
     onIncomingImageDisplayed: (String) -> Unit = {},
     onContentLayout: (() -> Unit)? = null,
 ) {
@@ -882,23 +1048,23 @@ private fun ChatMessageRow(
             MessageType.IMAGE -> {
                 val isPendingImage = message.content.startsWith("pending://")
                 val imageModel = localImageUri ?: message.content
-                val canOpenImage = !isPendingImage && !isImageUploading
+                val canOpenImage = !isPendingImage && !isMediaUploading
                 Box(
                     modifier = Modifier
                         .align(alignment)
                         .widthIn(max = 156.dp)
                         .clip(bubbleShape)
                         .background(bubbleColor, bubbleShape)
+                        // iOS: 3pt thin frame all around + 7pt inset for the bubble tail.
+                        .padding(3.dp)
                         .padding(
                             start = if (outgoing) 0.dp else 7.dp,
                             end = if (outgoing) 7.dp else 0.dp,
-                            top = 3.dp,
-                            bottom = 3.dp,
                         ),
                 ) {
                     ChatImageMessageContent(
                         imageModel = imageModel,
-                        isImageUploading = isImageUploading,
+                        isImageUploading = isMediaUploading,
                         isIncoming = !outgoing,
                         messageKey = message.deduplicationKey,
                         canOpenImage = canOpenImage,
@@ -909,14 +1075,62 @@ private fun ChatMessageRow(
                     )
                     Text(
                         text = timeText,
-                        fontSize = 11.sp,
                         color = Color.White,
+                        style = TextStyle(
+                            fontSize = 11.sp,
+                            lineHeight = 11.sp,
+                            platformStyle = PlatformTextStyle(includeFontPadding = false),
+                        ),
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(6.dp)
                             .clip(RoundedCornerShape(50))
                             .background(Color.Black.copy(alpha = 0.45f))
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                            .padding(horizontal = 6.dp, vertical = 1.dp),
+                    )
+                }
+            }
+            MessageType.VIDEO -> {
+                val isPending = message.content.startsWith("pending://")
+                val canOpen = !isPending && !isMediaUploading
+                Box(
+                    modifier = Modifier
+                        .align(alignment)
+                        .widthIn(max = 156.dp)
+                        .clip(bubbleShape)
+                        .background(bubbleColor, bubbleShape)
+                        .padding(3.dp)
+                        .padding(
+                            start = if (outgoing) 0.dp else 7.dp,
+                            end = if (outgoing) 7.dp else 0.dp,
+                        )
+                        .then(
+                            if (canOpen) {
+                                Modifier.clickable { onOpenVideo(message.content) }
+                            } else {
+                                Modifier
+                            },
+                        ),
+                ) {
+                    ChatVideoBubbleContent(
+                        thumbnailModel = localVideoThumbnail ?: message.thumbnailURL,
+                        durationSeconds = message.videoDurationSeconds,
+                        isUploading = isMediaUploading || isPending,
+                    )
+                    Text(
+                        text = timeText,
+                        color = Color.White,
+                        style = TextStyle(
+                            fontSize = 11.sp,
+                            lineHeight = 11.sp,
+                            platformStyle = PlatformTextStyle(includeFontPadding = false),
+                        ),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(6.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(Color.Black.copy(alpha = 0.45f))
+                            .padding(horizontal = 6.dp, vertical = 1.dp),
                     )
                 }
             }
@@ -939,6 +1153,7 @@ private fun ChatMessageRow(
                     modifier = Modifier
                         .align(alignment)
                         .widthIn(max = 280.dp)
+                        .width(IntrinsicSize.Max)
                         .wrapContentWidth(
                             align = if (outgoing) Alignment.End else Alignment.Start,
                         )
@@ -950,16 +1165,18 @@ private fun ChatMessageRow(
                             top = 6.dp,
                             bottom = 6.dp,
                         ),
+                    horizontalAlignment = Alignment.End,
                 ) {
                     Text(
                         text = displayed,
                         modifier = Modifier.widthIn(max = 252.dp),
                         color = ChatBubbleText,
                         fontSize = 16.sp,
+                        textAlign = TextAlign.Start,
                     )
                     Row(
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.Bottom,
-                        horizontalArrangement = Arrangement.End,
                     ) {
                         if (isLong && !expanded) {
                             Text(
@@ -972,6 +1189,7 @@ private fun ChatMessageRow(
                                     .padding(end = 8.dp),
                             )
                         }
+                        Spacer(modifier = Modifier.weight(1f))
                         Text(
                             text = timeText,
                             fontSize = 11.sp,
@@ -990,6 +1208,7 @@ private fun ChatComposerBar(
     onDraftChange: (String) -> Unit,
     isSending: Boolean,
     isRecording: Boolean = false,
+    enabled: Boolean = true,
     onSend: () -> Unit,
     onAttachImage: () -> Unit,
     onRequestStartRecording: () -> Unit,
@@ -1021,7 +1240,8 @@ private fun ChatComposerBar(
     ) {
         BasicTextField(
             value = draft,
-            onValueChange = onDraftChange,
+            onValueChange = { if (enabled) onDraftChange(it) },
+            enabled = enabled,
             onTextLayout = { result ->
                 lineCount = result.lineCount.coerceAtLeast(1)
             },
@@ -1050,7 +1270,7 @@ private fun ChatComposerBar(
         if (hasText) {
             IconButton(
                 onClick = onSend,
-                enabled = !isSending,
+                enabled = enabled && !isSending,
                 modifier = Modifier
                     .size(34.dp)
                     .clip(CircleShape)
@@ -1074,7 +1294,7 @@ private fun ChatComposerBar(
         } else {
             IconButton(
                 onClick = onAttachImage,
-                enabled = !isSending,
+                enabled = enabled && !isSending,
                 modifier = Modifier.size(34.dp),
             ) {
                 Icon(
@@ -1094,8 +1314,8 @@ private fun ChatComposerBar(
                             Modifier
                         },
                     )
-                    .pointerInput(isSending) {
-                        if (isSending) return@pointerInput
+                    .pointerInput(isSending, enabled) {
+                        if (isSending || !enabled) return@pointerInput
                         awaitEachGesture {
                             awaitFirstDown(requireUnconsumed = false)
                             val releasedEarly = withTimeoutOrNull(MIC_LONG_PRESS_MS) {
@@ -1126,7 +1346,7 @@ private fun formatBubbleTime(date: java.util.Date): String =
     java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(date)
 
 private enum class PendingMediaAfterWarning {
-    Photo,
+    Media,
     Voice,
 }
 

@@ -99,6 +99,8 @@ import com.example.spectroom.viewmodel.DiscoverUiState
 import kotlin.math.roundToInt
 
 private val CardCorner = 24.dp
+private val DailyLimitMessageCorner = 18.dp
+private val DailyLimitUpgradeBlue = Color(red = 0.45f, green = 0.78f, blue = 1.0f)
 private val PhotoHeight = 340.dp
 private val CardHeight = 500.dp
 private val CardHorizontalInset = 30.dp
@@ -170,7 +172,7 @@ fun DiscoverScreen(
     var showingEnergyPicker by remember { mutableStateOf(false) }
     var showingDistancePicker by remember { mutableStateOf(false) }
     var showingDailyLimitWhy by remember { mutableStateOf(false) }
-    val showActions = !profileIncomplete && !reachedLimit && profile != null
+    val showActions = !profileIncomplete && profile != null
 
     Box(
         modifier = Modifier
@@ -238,10 +240,21 @@ fun DiscoverScreen(
         }
 
         if (showActions) {
+            // Mirror iOS: keep Pass / Undo / Like visible under the daily-limit overlay,
+            // blurred + non-interactive (not hidden).
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = ActionRowBottomPadding),
+                    .padding(bottom = ActionRowBottomPadding)
+                    .then(
+                        if (reachedLimit) {
+                            Modifier
+                                .blur(8.dp)
+                                .graphicsLayer { alpha = 0.85f }
+                        } else {
+                            Modifier
+                        },
+                    ),
                 horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -251,14 +264,16 @@ fun DiscoverScreen(
                     onClick = { onProgrammaticSwipe(SwipeType.PASS) },
                     size = 84.dp,
                     iconSize = 34.dp,
+                    interactive = !reachedLimit,
                 )
                 ActionCircle(
                     icon = Icons.Filled.Replay,
                     tint = colors.text,
-                    enabled = state.canUndo,
+                    enabled = state.canUndo && !reachedLimit,
                     onClick = onUndo,
                     size = 58.dp,
                     iconSize = 20.dp,
+                    interactive = !reachedLimit,
                 )
                 ActionCircle(
                     icon = Icons.Filled.Favorite,
@@ -266,6 +281,7 @@ fun DiscoverScreen(
                     onClick = { onProgrammaticSwipe(SwipeType.LIKE) },
                     size = 84.dp,
                     iconSize = 34.dp,
+                    interactive = !reachedLimit,
                 )
             }
         }
@@ -288,7 +304,11 @@ fun DiscoverScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text(text = "📍", fontSize = 14.sp)
+            Image(
+                painter = painterResource(R.drawable.ic_map),
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
             Text(
                 text = state.distanceOption.shortButtonTitle,
                 color = colors.text,
@@ -603,11 +623,7 @@ private fun DailyLimitWhyOverlay(onDismiss: () -> Unit) {
     val dismissInteraction = remember { MutableInteractionSource() }
     val okInteraction = remember { MutableInteractionSource() }
     val cardShape = RoundedCornerShape(28.dp)
-    val cardBackground = if (colors.isDark) {
-        Color(0xFF2C2C2E).copy(alpha = 0.88f)
-    } else {
-        Color.White.copy(alpha = 0.82f)
-    }
+    val cardBackground = colors.card
     val buttonBackground = if (colors.isDark) {
         Color.White.copy(alpha = 0.12f)
     } else {
@@ -618,13 +634,13 @@ private fun DailyLimitWhyOverlay(onDismiss: () -> Unit) {
         modifier = Modifier
             .fillMaxSize()
             .zIndex(100f)
-            .background(Color.Black.copy(alpha = 0.35f))
+            .background(Color.Black.copy(alpha = 0.45f))
             .clickable(
                 interactionSource = dismissInteraction,
                 indication = null,
                 onClick = onDismiss,
             )
-            .padding(horizontal = 28.dp),
+            .padding(horizontal = 22.dp),
         contentAlignment = Alignment.Center,
     ) {
         Column(
@@ -632,35 +648,27 @@ private fun DailyLimitWhyOverlay(onDismiss: () -> Unit) {
                 .fillMaxWidth()
                 .clip(cardShape)
                 .background(cardBackground)
-                .border(
-                    width = 0.5.dp,
-                    color = if (colors.isDark) {
-                        Color.White.copy(alpha = 0.14f)
-                    } else {
-                        Color.White.copy(alpha = 0.65f)
-                    },
-                    shape = cardShape,
-                )
+                .border(1.dp, colors.border, cardShape)
                 .clickable(enabled = false) {}
-                .padding(horizontal = 20.dp, vertical = 22.dp),
+                .padding(horizontal = 22.dp, vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
                 text = stringResource(R.string.discover_daily_limit_why_title),
                 fontWeight = FontWeight.Bold,
-                fontSize = 17.sp,
+                fontSize = 19.sp,
                 color = colors.text,
                 textAlign = TextAlign.Center,
             )
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = stringResource(R.string.discover_daily_limit_why_message),
-                color = colors.secondaryText,
-                fontSize = 13.sp,
-                lineHeight = 18.sp,
+                color = colors.text,
+                fontSize = 15.sp,
+                lineHeight = 21.sp,
                 textAlign = TextAlign.Center,
             )
-            Spacer(modifier = Modifier.height(22.dp))
+            Spacer(modifier = Modifier.height(24.dp))
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -671,7 +679,7 @@ private fun DailyLimitWhyOverlay(onDismiss: () -> Unit) {
                         indication = null,
                         onClick = onDismiss,
                     )
-                    .padding(vertical = 14.dp),
+                    .padding(vertical = 15.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -896,7 +904,7 @@ private fun SwipeableProfileCard(
                 scaleX = stackScale
                 scaleY = stackScale
                 translationY = stackYOffsetPx
-                alpha = if (isDailyLimitReached) 0.85f else stackAlpha
+                alpha = stackAlpha
             }
             .offset {
                 IntOffset(
@@ -961,11 +969,20 @@ private fun SwipeableProfileCard(
         }
 
         if (isDailyLimitReached) {
+            // Mirror iOS full-card gradient scrim so light photos can't wash out white text.
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .clip(RoundedCornerShape(CardCorner))
-                    .background(Color.Black.copy(alpha = 0.28f)),
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Black.copy(alpha = 0.55f),
+                                Color.Black.copy(alpha = 0.72f),
+                                Color.Black.copy(alpha = 0.62f),
+                            ),
+                        ),
+                    ),
             )
         }
 
@@ -1017,13 +1034,17 @@ private fun DailyLimitOverlay(
     val whyInteractionSource = remember { MutableInteractionSource() }
     val upgradeInteractionSource = remember { MutableInteractionSource() }
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 28.dp),
+        modifier = Modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.weight(1f).defaultMinSize(minHeight = 24.dp))
         Column(
+            modifier = Modifier
+                .padding(horizontal = 18.dp)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(DailyLimitMessageCorner))
+                .background(Color.Black.copy(alpha = 0.55f))
+                .padding(vertical = 18.dp, horizontal = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
@@ -1033,19 +1054,26 @@ private fun DailyLimitOverlay(
                 fontSize = 22.sp,
                 color = Color.White,
                 textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 20.dp),
             )
             if (planTier == PlanTier.PREMIUM) {
                 Text(
                     text = stringResource(R.string.search_daily_limit_premium_tomorrow),
-                    color = Color.White.copy(alpha = 0.92f),
+                    color = Color.White,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 15.sp,
                     textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
             } else {
                 Text(
                     text = buildAnnotatedString {
-                        withStyle(SpanStyle(color = TabSelected, fontWeight = FontWeight.SemiBold)) {
+                        withStyle(
+                            SpanStyle(
+                                color = DailyLimitUpgradeBlue,
+                                fontWeight = FontWeight.SemiBold,
+                            ),
+                        ) {
                             append(stringResource(R.string.search_daily_limit_upgrade_prefix))
                         }
                         withStyle(SpanStyle(color = Color.White, fontWeight = FontWeight.SemiBold)) {
@@ -1060,25 +1088,29 @@ private fun DailyLimitOverlay(
                             indication = null,
                             onClick = onUpgradePlans,
                         )
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                        .padding(horizontal = 16.dp),
                 )
             }
         }
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.weight(1f).defaultMinSize(minHeight = 24.dp))
         Text(
             text = stringResource(R.string.search_daily_limit_why),
-            color = Color.White.copy(alpha = 0.92f),
+            color = Color.White,
             fontWeight = FontWeight.SemiBold,
             fontSize = 14.sp,
             textDecoration = TextDecoration.Underline,
             textAlign = TextAlign.Center,
             modifier = Modifier
+                .padding(horizontal = 24.dp)
                 .padding(bottom = 28.dp)
+                .clip(RoundedCornerShape(percent = 50))
+                .background(Color.Black.copy(alpha = 0.55f))
                 .clickable(
                     interactionSource = whyInteractionSource,
                     indication = null,
                     onClick = onShowWhy,
-                ),
+                )
+                .padding(horizontal = 16.dp, vertical = 10.dp),
         )
     }
 }
@@ -1380,20 +1412,40 @@ private fun ActionCircle(
     size: androidx.compose.ui.unit.Dp,
     iconSize: androidx.compose.ui.unit.Dp,
     enabled: Boolean = true,
+    /** When false, render a static circle with no press/ripple (daily-limit blur state). */
+    interactive: Boolean = true,
 ) {
     val colors = LocalSpectRoomColors.current
+    val iconTint = if (enabled) tint else tint.copy(alpha = 0.4f)
+    val circleModifier = Modifier
+        .size(size)
+        .background(colors.card, CircleShape)
+        .border(1.dp, colors.border, CircleShape)
+
+    if (!interactive) {
+        Box(
+            modifier = circleModifier,
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = iconTint,
+                modifier = Modifier.size(iconSize),
+            )
+        }
+        return
+    }
+
     IconButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier
-            .size(size)
-            .background(colors.card, CircleShape)
-            .border(1.dp, colors.border, CircleShape),
+        modifier = circleModifier,
     ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = if (enabled) tint else tint.copy(alpha = 0.4f),
+            tint = iconTint,
             modifier = Modifier.size(iconSize),
         )
     }

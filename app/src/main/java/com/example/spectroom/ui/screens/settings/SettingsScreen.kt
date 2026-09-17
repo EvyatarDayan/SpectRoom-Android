@@ -1,7 +1,9 @@
 package com.example.spectroom.ui.screens.settings
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,21 +44,27 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.example.spectroom.R
 import com.example.spectroom.data.model.AppLanguage
+import com.example.spectroom.data.model.PlanTier
 import com.example.spectroom.ui.components.TabBarBodyHeight
-import com.example.spectroom.ui.theme.LikeRed
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
 import com.example.spectroom.ui.theme.TabSelected
 
@@ -71,6 +79,10 @@ private val SettingsTitleBarReserve =
 private val SectionTitleBottomPadding = 8.dp
 private val RowVerticalPadding = 14.dp
 private val IconSize = 24.dp
+private val SignOutConfirmCardCorner = 16.dp
+private val SignOutConfirmButtonCorner = 12.dp
+/** Mirror iOS danger-zone coral `Color(red: 1.0, green: 0.45, blue: 0.45)`. */
+private val DangerZoneCoral = Color(red = 1f, green = 0.45f, blue = 0.45f)
 
 @Composable
 fun SettingsScreen(
@@ -79,6 +91,8 @@ fun SettingsScreen(
     notificationsEnabled: Boolean,
     blockedUsersCount: Int = 0,
     reportedProfilesCount: Int = 0,
+    accountEmail: String = "",
+    planTier: PlanTier = PlanTier.FREE,
     onDarkModeChange: (Boolean) -> Unit,
     onLanguageClick: () -> Unit,
     onNotificationsChange: (Boolean) -> Unit,
@@ -101,6 +115,7 @@ fun SettingsScreen(
     val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     // Clear the white tab bar + system nav + a visible gap above the menu.
     val settingsBottomPadding = navBarBottom + TabBarBodyHeight + SettingsMenuClearance
+    var showingSignOutConfirmation by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -173,6 +188,13 @@ fun SettingsScreen(
                 )
                 SettingsDivider()
                 SettingsNavigationRow(
+                    icon = Icons.Filled.Upload,
+                    title = stringResource(R.string.settings_export_messages),
+                    subtitle = stringResource(R.string.settings_export_messages_description),
+                    onClick = onExportMessages,
+                )
+                SettingsDivider()
+                SettingsNavigationRow(
                     icon = Icons.Filled.Block,
                     title = stringResource(
                         R.string.settings_blocked_users_count,
@@ -194,35 +216,30 @@ fun SettingsScreen(
             }
         }
 
-        SettingsSection(title = stringResource(R.string.settings_section_account_data)) {
+        SettingsSection(title = stringResource(R.string.settings_section_account)) {
             SettingsCard {
                 SettingsNavigationRow(
                     icon = Icons.Filled.CreditCard,
                     title = stringResource(R.string.settings_account_billing),
                     subtitle = stringResource(R.string.settings_account_billing_description),
                     onClick = onAccountBilling,
-                )
-                SettingsDivider()
-                SettingsNavigationRow(
-                    icon = Icons.Filled.Upload,
-                    title = stringResource(R.string.settings_export_messages),
-                    subtitle = stringResource(R.string.settings_export_messages_description),
-                    onClick = onExportMessages,
+                    trailing = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(text = planTier.titleStars, fontSize = 16.sp)
+                            SettingsChevron()
+                        }
+                    },
                 )
                 SettingsDivider()
                 SettingsNavigationRow(
                     icon = Icons.AutoMirrored.Filled.Logout,
                     title = stringResource(R.string.settings_sign_out),
-                    subtitle = stringResource(R.string.settings_sign_out_subtitle),
-                    onClick = onSignOut,
-                )
-                SettingsDivider()
-                SettingsNavigationRow(
-                    icon = Icons.Filled.Delete,
-                    title = stringResource(R.string.settings_delete_account),
-                    subtitle = stringResource(R.string.settings_delete_account_subtitle),
-                    onClick = onDeleteAccount,
-                    titleColor = LikeRed,
+                    // Mirror iOS: show the signed-in email under Sign Out.
+                    subtitle = accountEmail,
+                    onClick = { showingSignOutConfirmation = true },
                     showChevron = false,
                 )
             }
@@ -259,16 +276,32 @@ fun SettingsScreen(
             }
         }
 
-        if (isDebugBuild) {
+        SettingsSection(title = stringResource(R.string.settings_section_danger_zone)) {
             SettingsCard {
+                if (isDebugBuild) {
+                    SettingsNavigationRow(
+                        icon = Icons.Filled.RestartAlt,
+                        title = stringResource(R.string.settings_reset_user_data),
+                        subtitle = stringResource(R.string.settings_reset_user_data_description),
+                        onClick = onResetUserData,
+                        iconTint = DangerZoneCoral,
+                        titleColor = DangerZoneCoral,
+                        subtitleColor = DangerZoneCoral,
+                        showChevron = false,
+                    )
+                    SettingsDivider()
+                }
                 SettingsNavigationRow(
-                    icon = Icons.Filled.RestartAlt,
-                    title = stringResource(R.string.settings_reset_user_data),
-                    subtitle = stringResource(R.string.settings_reset_user_data_description),
-                    onClick = onResetUserData,
+                    icon = Icons.Filled.Delete,
+                    title = stringResource(R.string.settings_delete_account),
+                    subtitle = stringResource(R.string.settings_delete_account_subtitle),
+                    onClick = onDeleteAccount,
+                    iconTint = DangerZoneCoral,
+                    titleColor = DangerZoneCoral,
+                    subtitleColor = DangerZoneCoral,
+                    showChevron = false,
                 )
             }
-            Spacer(modifier = Modifier.height(20.dp))
         }
             }
         }
@@ -290,6 +323,16 @@ fun SettingsScreen(
                 fontSize = 28.sp,
                 color = colors.text,
                 textAlign = TextAlign.Center,
+            )
+        }
+
+        if (showingSignOutConfirmation) {
+            SignOutConfirmationOverlay(
+                onCancel = { showingSignOutConfirmation = false },
+                onConfirm = {
+                    showingSignOutConfirmation = false
+                    onSignOut()
+                },
             )
         }
     }
@@ -349,11 +392,14 @@ private fun SettingsChevron() {
 }
 
 @Composable
-private fun SettingsLeadingIcon(icon: ImageVector) {
+private fun SettingsLeadingIcon(
+    icon: ImageVector,
+    tint: Color = TabSelected,
+) {
     Icon(
         imageVector = icon,
         contentDescription = null,
-        tint = TabSelected,
+        tint = tint,
         modifier = Modifier.size(IconSize),
     )
 }
@@ -409,7 +455,9 @@ private fun SettingsNavigationRow(
     title: String,
     subtitle: String,
     onClick: () -> Unit,
-    titleColor: androidx.compose.ui.graphics.Color? = null,
+    iconTint: Color = TabSelected,
+    titleColor: Color? = null,
+    subtitleColor: Color? = null,
     showChevron: Boolean = true,
     trailing: (@Composable () -> Unit)? = null,
 ) {
@@ -421,7 +469,7 @@ private fun SettingsNavigationRow(
             .padding(horizontal = 16.dp, vertical = RowVerticalPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        SettingsLeadingIcon(icon)
+        SettingsLeadingIcon(icon, tint = iconTint)
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -432,13 +480,111 @@ private fun SettingsNavigationRow(
             )
             Text(
                 text = subtitle,
-                color = colors.secondaryText,
+                color = subtitleColor ?: colors.secondaryText,
                 fontSize = 12.sp,
             )
         }
         when {
             trailing != null -> trailing()
             showChevron -> SettingsChevron()
+        }
+    }
+}
+
+/** Mirror iOS `SignOutConfirmationOverlay` — title + Cancel / Yes side by side. */
+@Composable
+private fun SignOutConfirmationOverlay(
+    onCancel: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val colors = LocalSpectRoomColors.current
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.45f))
+            .zIndex(40f)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onCancel,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 36.dp)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(SignOutConfirmCardCorner))
+                .background(colors.card)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {},
+                ),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = stringResource(R.string.settings_sign_out_confirm_title),
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 17.sp,
+                color = colors.text,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(top = 22.dp),
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(SignOutConfirmButtonCorner))
+                        .background(colors.background)
+                        .border(1.dp, colors.border, RoundedCornerShape(SignOutConfirmButtonCorner))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onCancel,
+                        )
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(R.string.common_cancel),
+                        color = colors.text,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 15.sp,
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(SignOutConfirmButtonCorner))
+                        .background(TabSelected.copy(alpha = 0.1f))
+                        .border(1.dp, TabSelected.copy(alpha = 0.35f), RoundedCornerShape(SignOutConfirmButtonCorner))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onConfirm,
+                        )
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(R.string.settings_sign_out_confirm_yes),
+                        color = TabSelected,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 15.sp,
+                    )
+                }
+            }
         }
     }
 }
