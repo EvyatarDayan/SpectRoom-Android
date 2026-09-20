@@ -1,17 +1,23 @@
 package com.example.spectroom.ui.screens.messages
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,6 +33,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -81,6 +88,7 @@ import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
@@ -92,8 +100,13 @@ import coil3.compose.AsyncImage
 import com.example.spectroom.R
 import com.example.spectroom.data.model.AdminSender
 import com.example.spectroom.data.model.ChatImageLimits
+import com.example.spectroom.data.model.MessageDeleteOption
 import com.example.spectroom.data.model.MessageDisplay
 import com.example.spectroom.data.model.MessageType
+import com.example.spectroom.data.model.ProfileReportReason
+import com.example.spectroom.ui.screens.discover.ReportReasonHeaderStyle
+import com.example.spectroom.ui.screens.discover.ReportReasonOverlay
+import com.example.spectroom.ui.screens.discover.ReportThankYouOverlay
 import com.example.spectroom.ui.theme.ChatBubbleText
 import com.example.spectroom.ui.theme.ChatComposerBar
 import com.example.spectroom.ui.theme.ChatReadMore
@@ -158,6 +171,9 @@ fun ChatScreen(
     onOpenPartnerProfile: () -> Unit = {},
     onBlock: () -> Unit = {},
     onReport: () -> Unit = {},
+    onReactMessage: (MessageDisplay, String) -> Unit = { _, _ -> },
+    onSoftDeleteMessage: (MessageDisplay, MessageDeleteOption) -> Unit = { _, _ -> },
+    onSubmitChatReport: (ProfileReportReason, String?, Boolean) -> Unit = { _, _, _ -> },
 ) {
     val colors = LocalSpectRoomColors.current
     val context = LocalContext.current
@@ -167,6 +183,41 @@ fun ChatScreen(
     var showImageTooLargeAlert by remember { mutableStateOf(false) }
     var pendingScrollPreserve by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     val listState = rememberLazyListState()
+    var messagePendingActions by remember { mutableStateOf<MessageDisplay?>(null) }
+    var messagePendingDelete by remember { mutableStateOf<MessageDisplay?>(null) }
+    var showingReportConfirmation by remember { mutableStateOf(false) }
+    var showingReportReason by remember { mutableStateOf(false) }
+    var showingReportThankYou by remember { mutableStateOf(false) }
+    var reportReasonHeaderStyle by remember { mutableStateOf(ReportReasonHeaderStyle.REPORT_ONLY) }
+    var shouldDismissAfterReportFlow by remember { mutableStateOf(false) }
+    val partnerFirstName = remember(partnerName) {
+        partnerName.substringBefore(' ').ifBlank { partnerName }
+    }
+
+    fun canShowMessageActions(msg: MessageDisplay): Boolean =
+        !isAdminThread &&
+            !msg.isDeleted &&
+            !msg.content.startsWith("pending://")
+
+    fun canCopyMessageText(msg: MessageDisplay): Boolean {
+        if (msg.isDeleted || msg.content.startsWith("pending://")) return false
+        return msg.messageType == MessageType.TEXT || msg.messageType == MessageType.SYSTEM
+    }
+
+    fun copyMessageText(msg: MessageDisplay) {
+        if (!canCopyMessageText(msg)) return
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("message", msg.content))
+    }
+
+    fun finishReportThankYou() {
+        val dismissChat = shouldDismissAfterReportFlow
+        showingReportThankYou = false
+        shouldDismissAfterReportFlow = false
+        reportReasonHeaderStyle = ReportReasonHeaderStyle.REPORT_ONLY
+        if (dismissChat) onBack()
+    }
+
     val mediaPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
@@ -371,6 +422,11 @@ fun ChatScreen(
                         } else {
                             null
                         },
+                        onRequestActions = if (canShowMessageActions(message) && !isMediaUploading) {
+                            { messagePendingActions = message }
+                        } else {
+                            null
+                        },
                     )
                 }
                 item(key = CONVERSATION_BOTTOM_ANCHOR_KEY) {
@@ -530,6 +586,85 @@ fun ChatScreen(
             videoUrl = url,
             onDismiss = { playingVideoUrl = null },
         )
+    }
+
+    when {
+        messagePendingActions != null -> {
+            val pending = messagePendingActions!!
+            MessageQuickActionsOverlay(
+                canCopy = canCopyMessageText(pending),
+                onReact = { emoji ->
+                    onReactMessage(pending, emoji)
+                    messagePendingActions = null
+                },
+                onCopy = {
+                    copyMessageText(pending)
+                    messagePendingActions = null
+                },
+                onReport = {
+                    messagePendingActions = null
+                    showingReportConfirmation = true
+                },
+                onDelete = {
+                    messagePendingActions = null
+                    messagePendingDelete = pending
+                },
+                onCancel = { messagePendingActions = null },
+            )
+        }
+        showingReportConfirmation -> {
+            ChatReportConfirmationOverlay(
+                firstName = partnerFirstName,
+                onCancel = { showingReportConfirmation = false },
+                onReport = {
+                    showingReportConfirmation = false
+                    shouldDismissAfterReportFlow = false
+                    reportReasonHeaderStyle = ReportReasonHeaderStyle.REPORT_ONLY
+                    showingReportReason = true
+                },
+                onReportAndBlock = {
+                    showingReportConfirmation = false
+                    shouldDismissAfterReportFlow = true
+                    reportReasonHeaderStyle = ReportReasonHeaderStyle.BLOCKED
+                    onBlock()
+                    showingReportReason = true
+                },
+            )
+        }
+        showingReportReason -> {
+            ReportReasonOverlay(
+                firstName = partnerFirstName,
+                headerStyle = reportReasonHeaderStyle,
+                onCancel = {
+                    showingReportReason = false
+                    shouldDismissAfterReportFlow = false
+                    reportReasonHeaderStyle = ReportReasonHeaderStyle.REPORT_ONLY
+                },
+                onSubmit = { reason, details ->
+                    // Block already happened via onBlock() on report+block path.
+                    onSubmitChatReport(reason, details, false)
+                    showingReportReason = false
+                    showingReportThankYou = true
+                },
+            )
+        }
+        showingReportThankYou -> {
+            ReportThankYouOverlay(
+                didBlock = shouldDismissAfterReportFlow,
+                onDismiss = { finishReportThankYou() },
+            )
+        }
+        messagePendingDelete != null -> {
+            val pending = messagePendingDelete!!
+            MessageDeleteOptionsOverlay(
+                allowsDeleteForEveryone = pending.canDeleteForEveryone(),
+                onDelete = { option ->
+                    onSoftDeleteMessage(pending, option)
+                    messagePendingDelete = null
+                },
+                onCancel = { messagePendingDelete = null },
+            )
+        }
     }
 }
 
@@ -850,6 +985,7 @@ private fun ChatDateSeparator(title: String) {
 private val CHAT_IMAGE_BUBBLE_SIZE = 150.dp
 private val CHAT_IMAGE_CORNER = 12.dp
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ChatImageMessageContent(
     imageModel: Any?,
@@ -858,6 +994,7 @@ private fun ChatImageMessageContent(
     messageKey: String,
     canOpenImage: Boolean,
     onOpenImage: (String) -> Unit,
+    onLongPress: (() -> Unit)? = null,
     remoteContent: String,
     onContentLayout: (() -> Unit)?,
     onIncomingImageDisplayed: (String) -> Unit,
@@ -889,10 +1026,14 @@ private fun ChatImageMessageContent(
             .size(width = widthDp, height = heightDp)
             .clip(RoundedCornerShape(CHAT_IMAGE_CORNER))
             .then(
-                if (canOpenImage) {
-                    Modifier.clickable { onOpenImage(remoteContent) }
-                } else {
-                    Modifier
+                when {
+                    canOpenImage || onLongPress != null -> Modifier.combinedClickable(
+                        onClick = {
+                            if (canOpenImage) onOpenImage(remoteContent)
+                        },
+                        onLongClick = { onLongPress?.invoke() },
+                    )
+                    else -> Modifier
                 },
             ),
         contentAlignment = Alignment.Center,
@@ -1019,6 +1160,7 @@ private fun ChatVideoBubbleContent(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ChatMessageRow(
     message: MessageDisplay,
@@ -1032,11 +1174,14 @@ private fun ChatMessageRow(
     onOpenVideo: (String) -> Unit = {},
     onIncomingImageDisplayed: (String) -> Unit = {},
     onContentLayout: (() -> Unit)? = null,
+    onRequestActions: (() -> Unit)? = null,
 ) {
     val colors = LocalSpectRoomColors.current
     val bubbleColor = if (outgoing) OutgoingChatBubble else IncomingChatBubble
     val bubbleShape = ChatBubbleShape(isOutgoing = outgoing)
     val timeText = formatBubbleTime(message.createdAt)
+    val isPending = message.content.startsWith("pending://")
+    val canRequestActions = onRequestActions != null && !isPending && !isMediaUploading
 
     Box(
         modifier = Modifier
@@ -1044,114 +1189,13 @@ private fun ChatMessageRow(
             .padding(vertical = 4.dp),
     ) {
         val alignment = if (outgoing) Alignment.CenterEnd else Alignment.CenterStart
-        when (message.messageType) {
-            MessageType.IMAGE -> {
-                val isPendingImage = message.content.startsWith("pending://")
-                val imageModel = localImageUri ?: message.content
-                val canOpenImage = !isPendingImage && !isMediaUploading
-                Box(
-                    modifier = Modifier
-                        .align(alignment)
-                        .widthIn(max = 156.dp)
-                        .clip(bubbleShape)
-                        .background(bubbleColor, bubbleShape)
-                        // iOS: 3pt thin frame all around + 7pt inset for the bubble tail.
-                        .padding(3.dp)
-                        .padding(
-                            start = if (outgoing) 0.dp else 7.dp,
-                            end = if (outgoing) 7.dp else 0.dp,
-                        ),
-                ) {
-                    ChatImageMessageContent(
-                        imageModel = imageModel,
-                        isImageUploading = isMediaUploading,
-                        isIncoming = !outgoing,
-                        messageKey = message.deduplicationKey,
-                        canOpenImage = canOpenImage,
-                        onOpenImage = onOpenImage,
-                        remoteContent = message.content,
-                        onContentLayout = onContentLayout,
-                        onIncomingImageDisplayed = onIncomingImageDisplayed,
-                    )
-                    Text(
-                        text = timeText,
-                        color = Color.White,
-                        style = TextStyle(
-                            fontSize = 11.sp,
-                            lineHeight = 11.sp,
-                            platformStyle = PlatformTextStyle(includeFontPadding = false),
-                        ),
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(6.dp)
-                            .clip(RoundedCornerShape(50))
-                            .background(Color.Black.copy(alpha = 0.45f))
-                            .padding(horizontal = 6.dp, vertical = 1.dp),
-                    )
-                }
-            }
-            MessageType.VIDEO -> {
-                val isPending = message.content.startsWith("pending://")
-                val canOpen = !isPending && !isMediaUploading
-                Box(
-                    modifier = Modifier
-                        .align(alignment)
-                        .widthIn(max = 156.dp)
-                        .clip(bubbleShape)
-                        .background(bubbleColor, bubbleShape)
-                        .padding(3.dp)
-                        .padding(
-                            start = if (outgoing) 0.dp else 7.dp,
-                            end = if (outgoing) 7.dp else 0.dp,
-                        )
-                        .then(
-                            if (canOpen) {
-                                Modifier.clickable { onOpenVideo(message.content) }
-                            } else {
-                                Modifier
-                            },
-                        ),
-                ) {
-                    ChatVideoBubbleContent(
-                        thumbnailModel = localVideoThumbnail ?: message.thumbnailURL,
-                        durationSeconds = message.videoDurationSeconds,
-                        isUploading = isMediaUploading || isPending,
-                    )
-                    Text(
-                        text = timeText,
-                        color = Color.White,
-                        style = TextStyle(
-                            fontSize = 11.sp,
-                            lineHeight = 11.sp,
-                            platformStyle = PlatformTextStyle(includeFontPadding = false),
-                        ),
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(6.dp)
-                            .clip(RoundedCornerShape(50))
-                            .background(Color.Black.copy(alpha = 0.45f))
-                            .padding(horizontal = 6.dp, vertical = 1.dp),
-                    )
-                }
-            }
-            MessageType.VOICE -> VoiceMessagePlayer(
-                audioUrl = message.content,
-                displayDurationSeconds = message.voiceDurationSeconds,
-                isOutgoing = outgoing,
-                timestampText = timeText,
-                modifier = Modifier.align(alignment),
-            )
-            else -> {
-                val isLong = message.content.length > LONG_MESSAGE_COLLAPSE_LIMIT
-                val expanded = message.id in expandedLongMessageIds
-                val displayed = if (isLong && !expanded) {
-                    message.content.take(LONG_MESSAGE_COLLAPSE_LIMIT)
-                } else {
-                    message.content
-                }
+        Column(
+            modifier = Modifier.align(alignment),
+            horizontalAlignment = if (outgoing) Alignment.End else Alignment.Start,
+        ) {
+            if (message.isDeleted) {
                 Column(
                     modifier = Modifier
-                        .align(alignment)
                         .widthIn(max = 280.dp)
                         .width(IntrinsicSize.Max)
                         .wrapContentWidth(
@@ -1168,33 +1212,234 @@ private fun ChatMessageRow(
                     horizontalAlignment = Alignment.End,
                 ) {
                     Text(
-                        text = displayed,
+                        text = stringResource(R.string.messages_deleted_placeholder),
                         modifier = Modifier.widthIn(max = 252.dp),
-                        color = ChatBubbleText,
+                        color = colors.secondaryText,
                         fontSize = 16.sp,
+                        fontStyle = FontStyle.Italic,
                         textAlign = TextAlign.Start,
                     )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.Bottom,
-                    ) {
-                        if (isLong && !expanded) {
+                    Text(
+                        text = timeText,
+                        fontSize = 11.sp,
+                        color = colors.secondaryText,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+            } else {
+                when (message.messageType) {
+                    MessageType.IMAGE -> {
+                        val imageModel = localImageUri ?: message.content
+                        val canOpenImage = !isPending && !isMediaUploading
+                        Box(
+                            modifier = Modifier
+                                .widthIn(max = 156.dp)
+                                .clip(bubbleShape)
+                                .background(bubbleColor, bubbleShape)
+                                .padding(3.dp)
+                                .padding(
+                                    start = if (outgoing) 0.dp else 7.dp,
+                                    end = if (outgoing) 7.dp else 0.dp,
+                                ),
+                        ) {
+                            ChatImageMessageContent(
+                                imageModel = imageModel,
+                                isImageUploading = isMediaUploading,
+                                isIncoming = !outgoing,
+                                messageKey = message.deduplicationKey,
+                                canOpenImage = canOpenImage,
+                                onOpenImage = onOpenImage,
+                                onLongPress = if (canRequestActions) onRequestActions else null,
+                                remoteContent = message.content,
+                                onContentLayout = onContentLayout,
+                                onIncomingImageDisplayed = onIncomingImageDisplayed,
+                            )
                             Text(
-                                text = stringResource(R.string.messages_read_more),
-                                color = ChatReadMore,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 14.sp,
+                                text = timeText,
+                                color = Color.White,
+                                style = TextStyle(
+                                    fontSize = 11.sp,
+                                    lineHeight = 11.sp,
+                                    platformStyle = PlatformTextStyle(includeFontPadding = false),
+                                ),
                                 modifier = Modifier
-                                    .clickable { onExpandLongMessage(message.id) }
-                                    .padding(end = 8.dp),
+                                    .align(Alignment.BottomEnd)
+                                    .padding(6.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(Color.Black.copy(alpha = 0.45f))
+                                    .padding(horizontal = 6.dp, vertical = 1.dp),
                             )
                         }
-                        Spacer(modifier = Modifier.weight(1f))
-                        Text(
-                            text = timeText,
-                            fontSize = 11.sp,
-                            color = colors.secondaryText,
-                        )
+                    }
+                    MessageType.VIDEO -> {
+                        val canOpen = !isPending && !isMediaUploading
+                        Box(
+                            modifier = Modifier
+                                .widthIn(max = 156.dp)
+                                .clip(bubbleShape)
+                                .background(bubbleColor, bubbleShape)
+                                .padding(3.dp)
+                                .padding(
+                                    start = if (outgoing) 0.dp else 7.dp,
+                                    end = if (outgoing) 7.dp else 0.dp,
+                                )
+                                .then(
+                                    when {
+                                        canOpen || canRequestActions -> Modifier.combinedClickable(
+                                            onClick = {
+                                                if (canOpen) onOpenVideo(message.content)
+                                            },
+                                            onLongClick = {
+                                                if (canRequestActions) onRequestActions?.invoke()
+                                            },
+                                        )
+                                        else -> Modifier
+                                    },
+                                ),
+                        ) {
+                            ChatVideoBubbleContent(
+                                thumbnailModel = localVideoThumbnail ?: message.thumbnailURL,
+                                durationSeconds = message.videoDurationSeconds,
+                                isUploading = isMediaUploading || isPending,
+                            )
+                            Text(
+                                text = timeText,
+                                color = Color.White,
+                                style = TextStyle(
+                                    fontSize = 11.sp,
+                                    lineHeight = 11.sp,
+                                    platformStyle = PlatformTextStyle(includeFontPadding = false),
+                                ),
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(6.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(Color.Black.copy(alpha = 0.45f))
+                                    .padding(horizontal = 6.dp, vertical = 1.dp),
+                            )
+                        }
+                    }
+                    MessageType.VOICE -> VoiceMessagePlayer(
+                        audioUrl = message.content,
+                        displayDurationSeconds = message.voiceDurationSeconds,
+                        isOutgoing = outgoing,
+                        timestampText = timeText,
+                        modifier = Modifier
+                            .then(
+                                if (canRequestActions) {
+                                    Modifier.pointerInput(message.id) {
+                                        detectTapGestures(
+                                            onLongPress = { onRequestActions?.invoke() },
+                                        )
+                                    }
+                                } else {
+                                    Modifier
+                                },
+                            ),
+                    )
+                    else -> {
+                        val isLong = message.content.length > LONG_MESSAGE_COLLAPSE_LIMIT
+                        val expanded = message.id in expandedLongMessageIds
+                        val displayed = if (isLong && !expanded) {
+                            message.content.take(LONG_MESSAGE_COLLAPSE_LIMIT)
+                        } else {
+                            message.content
+                        }
+                        Column(
+                            modifier = Modifier
+                                .widthIn(max = 280.dp)
+                                .width(IntrinsicSize.Max)
+                                .wrapContentWidth(
+                                    align = if (outgoing) Alignment.End else Alignment.Start,
+                                )
+                                .clip(bubbleShape)
+                                .background(bubbleColor, bubbleShape)
+                                .then(
+                                    if (canRequestActions) {
+                                        Modifier.combinedClickable(
+                                            onClick = {},
+                                            onLongClick = { onRequestActions?.invoke() },
+                                        )
+                                    } else {
+                                        Modifier
+                                    },
+                                )
+                                .padding(
+                                    start = if (outgoing) 10.dp else 17.dp,
+                                    end = if (outgoing) 17.dp else 10.dp,
+                                    top = 6.dp,
+                                    bottom = 6.dp,
+                                ),
+                            horizontalAlignment = Alignment.End,
+                        ) {
+                            Text(
+                                text = displayed,
+                                modifier = Modifier.widthIn(max = 252.dp),
+                                color = ChatBubbleText,
+                                fontSize = 16.sp,
+                                textAlign = TextAlign.Start,
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.Bottom,
+                            ) {
+                                if (isLong && !expanded) {
+                                    Text(
+                                        text = stringResource(R.string.messages_read_more),
+                                        color = ChatReadMore,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 14.sp,
+                                        modifier = Modifier
+                                            .clickable { onExpandLongMessage(message.id) }
+                                            .padding(end = 8.dp),
+                                    )
+                                }
+                                Spacer(modifier = Modifier.weight(1f))
+                                Text(
+                                    text = timeText,
+                                    fontSize = 11.sp,
+                                    color = colors.secondaryText,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!message.isDeleted && message.reactionSummary.isNotEmpty()) {
+                // Overlap the bubble's bottom edge (iOS MessageBubble reaction chip).
+                Row(
+                    modifier = Modifier
+                        .offset(y = (-10).dp)
+                        .padding(
+                            start = if (outgoing) 0.dp else 8.dp,
+                            end = if (outgoing) 8.dp else 0.dp,
+                        ),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    message.reactionSummary.forEach { (emoji, count) ->
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(colors.card.copy(alpha = 0.95f))
+                                .border(
+                                    1.dp,
+                                    colors.secondaryText.copy(alpha = 0.18f),
+                                    RoundedCornerShape(50),
+                                )
+                                .padding(horizontal = 7.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(text = emoji, fontSize = 13.sp)
+                            if (count > 1) {
+                                Text(
+                                    text = count.toString(),
+                                    fontSize = 11.sp,
+                                    color = colors.secondaryText,
+                                )
+                            }
+                        }
                     }
                 }
             }

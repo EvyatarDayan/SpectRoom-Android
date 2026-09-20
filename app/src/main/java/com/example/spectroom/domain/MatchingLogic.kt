@@ -341,9 +341,16 @@ object DiscoverEligibility {
         return haversineKm(lat1, lon1, lat2, lon2) <= maxDistanceKm
     }
 
+    @Suppress("UNUSED_PARAMETER")
     fun formatDistanceKm(km: Double, forMatches: Boolean = false): String {
-        val amount = when {
-            km < 1.0 -> if (forMatches) "1" else null
+        // Prefer repository `localizedDistanceKm` for locale-aware copy.
+        // English fallback mirrors iOS `search.distance.km` / `matches.distance.km`.
+        return "${formatDistanceAmount(km)} km away"
+    }
+
+    fun formatDistanceAmount(km: Double): String {
+        return when {
+            km < 1.0 -> "1"
             else -> {
                 val rounded = kotlin.math.round(km * 10.0) / 10.0
                 if (rounded == kotlin.math.floor(rounded)) {
@@ -353,13 +360,25 @@ object DiscoverEligibility {
                 }
             }
         }
-        return if (forMatches) {
-            "$amount km away"
-        } else when {
-            amount == null -> "< 1 km"
-            else -> "$amount km"
-        }
     }
+
+    /**
+     * Upgrades legacy cached labels like "1.5 km" / "< 1 km" to the iOS-style
+     * localized "%@ km away" form via [formatWithAmount].
+     */
+    fun upgradeDistanceLabel(raw: String, formatWithAmount: (String) -> String): String {
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty() || trimmed == "—" || trimmed.equals("Matched", ignoreCase = true)) {
+            return trimmed
+        }
+        if (trimmed.equals("Nearby", ignoreCase = true) || trimmed.equals("< 1 km", ignoreCase = true)) {
+            return formatWithAmount("1")
+        }
+        val legacy = LEGACY_KM_ONLY.matchEntire(trimmed) ?: return trimmed
+        return formatWithAmount(legacy.groupValues[1])
+    }
+
+    private val LEGACY_KM_ONLY = Regex("""^([\d.]+)\s*km$""", RegexOption.IGNORE_CASE)
 
     fun lookingForOverlaps(current: List<String>, other: List<String>): Boolean {
         val normalizedCurrent = current.filterNot {

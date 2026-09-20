@@ -70,6 +70,43 @@ class SpectRoomMessagingService : FirebaseMessagingService() {
                     badgeCount = badge,
                 )
             }
+            "moderation_account_restored" -> {
+                prefs.markRequiresRestoredAcknowledgement()
+                AccountRestoredEvents.emit()
+                val title = message.notification?.title
+                    ?: message.data["title"]
+                    ?: getString(com.example.spectroom.R.string.admin_restored_popup_title)
+                val body = message.notification?.body
+                    ?: message.data["body"]
+                    ?: getString(com.example.spectroom.R.string.admin_restored_popup_message)
+                helper.notifyModeration(
+                    type = LocalNotificationHelper.TYPE_ACCOUNT_RESTORED,
+                    title = title,
+                    body = body,
+                    badgeCount = badge,
+                )
+            }
+            "moderation_warning",
+            "moderation_freeze",
+            "moderation_freeze_extended",
+            "moderation_unfreeze",
+            "moderation_ban",
+            "moderation_unban",
+            -> {
+                val title = message.notification?.title
+                    ?: message.data["title"]
+                    ?: getString(com.example.spectroom.R.string.app_name)
+                val body = message.notification?.body
+                    ?: message.data["body"]
+                    ?: message.data["message"]
+                    ?: getString(com.example.spectroom.R.string.app_name)
+                helper.notifyModeration(
+                    type = type,
+                    title = title,
+                    body = body,
+                    badgeCount = badge,
+                )
+            }
             else -> {
                 val senderId = message.data["senderId"]
                     ?: message.data["sender_id"]

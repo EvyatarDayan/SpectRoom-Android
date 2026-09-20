@@ -123,6 +123,40 @@ class LocalNotificationHelper(private val context: Context) {
         }
     }
 
+    fun notifyModeration(
+        type: String,
+        title: String,
+        body: String,
+        badgeCount: Int = 1,
+    ) {
+        if (!prefs.notificationsEnabled) return
+        ensureChannel()
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(SpectRoomMessagingService.EXTRA_NOTIFICATION_TYPE, type)
+        }
+        val pending = PendingIntent.getActivity(
+            context,
+            ("moderation_$type").hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = NotificationCompat.Builder(context, SpectRoomMessagingService.CHANNEL_ID)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setNumber(badgeCount.coerceAtLeast(1))
+            .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
+            .setContentIntent(pending)
+            .build()
+        runCatching {
+            NotificationManagerCompat.from(context).notify(("moderation_$type").hashCode(), notification)
+        }
+    }
+
     fun syncLauncherBadge(count: Int) {
         ensureChannel()
         val manager = NotificationManagerCompat.from(context)
@@ -168,6 +202,7 @@ class LocalNotificationHelper(private val context: Context) {
         private const val BADGE_NOTIFICATION_ID = 42_001
         const val TYPE_MESSAGE = "message"
         const val TYPE_MATCH = "match"
+        const val TYPE_ACCOUNT_RESTORED = "moderation_account_restored"
 
         fun sanitizedPreview(content: String): String {
             val trimmed = content.trim()

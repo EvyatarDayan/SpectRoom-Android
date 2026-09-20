@@ -1,9 +1,14 @@
 package com.example.spectroom.data.local
 
 import android.content.Context
+import com.example.spectroom.R
+import com.example.spectroom.SpectRoomApplication
 import com.example.spectroom.data.model.DiscoverDistanceOption
 import com.example.spectroom.data.model.ProfileCard
 import com.example.spectroom.data.model.SpectRoomUser
+import com.example.spectroom.domain.DiscoverEligibility
+import com.example.spectroom.ui.locale.AppLocale
+import com.example.spectroom.data.local.AppPrefsStore
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Date
@@ -170,7 +175,7 @@ class DiscoverDeckCache(context: Context) {
                 age = obj.optInt("age"),
                 bio = obj.optString("bio"),
                 interests = obj.optJSONArray("interests").toStringList(),
-                distance = obj.optString("distance"),
+                distance = upgradeCachedDistance(obj.optString("distance")),
                 imageURL = obj.optNullableString("imageURL"),
                 gender = obj.optString("gender"),
                 interestedIn = obj.optJSONArray("interestedIn").toStringList(),
@@ -212,4 +217,14 @@ private fun JSONObject.optNullableString(key: String): String? {
 private fun JSONObject.optDoubleOrNull(key: String): Double? {
     if (!has(key) || isNull(key)) return null
     return optDouble(key)
+}
+
+/** Migrates legacy cached "1.5 km" labels to localized "1.5 km away". */
+private fun upgradeCachedDistance(raw: String): String {
+    val app = runCatching { SpectRoomApplication.instance }.getOrNull() ?: return raw
+    val languageCode = AppPrefsStore.readLanguageCode(app)
+    val context = AppLocale.localizedContext(app, languageCode)
+    return DiscoverEligibility.upgradeDistanceLabel(raw) { amount ->
+        context.getString(R.string.search_distance_km, amount)
+    }
 }

@@ -50,6 +50,8 @@ fun SystemWarningOverlay(
         is ModerationNotice.DeletedAcknowledgement,
         is ModerationNotice.LoginDeleted,
         -> stringResource(R.string.admin_deleted_popup_title)
+        is ModerationNotice.RestoredAcknowledgement ->
+            stringResource(R.string.admin_restored_popup_title)
     }
     val message = when (notice) {
         is ModerationNotice.Warning -> notice.message
@@ -69,6 +71,8 @@ fun SystemWarningOverlay(
         is ModerationNotice.DeletedAcknowledgement,
         is ModerationNotice.LoginDeleted,
         -> stringResource(R.string.admin_deleted_popup_message)
+        is ModerationNotice.RestoredAcknowledgement ->
+            stringResource(R.string.admin_restored_popup_message)
     }
     val accept = when (notice) {
         is ModerationNotice.Warning -> stringResource(R.string.admin_warning_popup_accept)
@@ -83,6 +87,8 @@ fun SystemWarningOverlay(
         is ModerationNotice.DeletedAcknowledgement,
         is ModerationNotice.LoginDeleted,
         -> stringResource(R.string.admin_deleted_popup_accept)
+        is ModerationNotice.RestoredAcknowledgement ->
+            stringResource(R.string.admin_restored_popup_accept)
     }
     val showSupport = when (notice) {
         is ModerationNotice.FreezeAcknowledgement,

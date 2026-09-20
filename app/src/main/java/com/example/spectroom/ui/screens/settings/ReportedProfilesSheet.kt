@@ -3,6 +3,7 @@ package com.example.spectroom.ui.screens.settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,8 +21,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,9 +41,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
 import com.example.spectroom.R
+import com.example.spectroom.data.model.ProfileReportReason
 import com.example.spectroom.data.model.UserReport
+import com.example.spectroom.ui.theme.LikeGreen
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
 import com.example.spectroom.ui.theme.TabSelected
 import java.text.SimpleDateFormat
@@ -248,114 +254,115 @@ private fun ReportDetailsOverlay(
     onDismiss: () -> Unit,
 ) {
     val colors = LocalSpectRoomColors.current
-    val statusLabel = when (report.status.lowercase()) {
-        "reviewed" -> stringResource(R.string.settings_reported_profiles_status_reviewed)
-        "dismissed" -> stringResource(R.string.settings_reported_profiles_status_dismissed)
-        "actioned" -> stringResource(R.string.settings_reported_profiles_status_actioned)
-        else -> stringResource(R.string.settings_reported_profiles_status_pending)
+    val somethingElseLabel = stringResource(ProfileReportReason.SOMETHING_ELSE.labelRes)
+    val category = report.category.trim()
+    val displayCategory = if (
+        category.equals(ProfileReportReason.SOMETHING_ELSE.storageCategory, ignoreCase = true) ||
+        category.equals(somethingElseLabel, ignoreCase = true)
+    ) {
+        stringResource(R.string.settings_reported_profiles_detail_see_details)
+    } else {
+        category
     }
-    val headline = report.createdAt?.let {
-        stringResource(
-            R.string.settings_reported_profiles_detail_headline,
-            report.reportedName,
-            formatReportedDetailDate(it),
-        )
-    } ?: stringResource(
-        R.string.settings_reported_profiles_detail_headline_no_date,
-        report.reportedName,
-    )
+    val details = report.details?.trim().orEmpty()
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.8f))
-            .clickable(onClick = onDismiss),
+            .background(Color.Black.copy(alpha = 0.35f))
+            .zIndex(40f)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onDismiss,
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Column(
             modifier = Modifier
-                .fillMaxWidth(0.88f)
+                .padding(horizontal = 36.dp)
+                .fillMaxWidth()
                 .clip(RoundedCornerShape(16.dp))
                 .background(colors.card)
-                .border(1.dp, colors.border.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
-                .clickable(enabled = false) {}
-                .padding(24.dp),
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {},
+                ),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Top,
-            ) {
-                ReportedProfileAvatar(
-                    name = report.reportedName,
-                    photoUrl = report.primaryPhotoUrl,
-                )
-                Spacer(modifier = Modifier.size(12.dp))
-                Text(
-                    text = headline,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 22.sp,
-                    lineHeight = 28.sp,
-                    color = colors.text,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-            DetailRow(
-                label = stringResource(R.string.settings_reported_profiles_detail_category),
-                value = report.category,
-            )
-            report.details?.trim()?.takeIf { it.isNotEmpty() }?.let { details ->
-                Spacer(modifier = Modifier.height(12.dp))
-                DetailRow(
-                    label = stringResource(R.string.settings_reported_profiles_detail_details),
-                    value = details,
-                )
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-            DetailRow(
-                label = stringResource(R.string.settings_reported_profiles_detail_status),
-                value = statusLabel,
-            )
-
-            Spacer(modifier = Modifier.height(20.dp))
-            Text(
-                text = stringResource(R.string.common_got_it),
-                fontWeight = FontWeight.Medium,
-                fontSize = 16.sp,
-                color = colors.text,
-                textAlign = TextAlign.Center,
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(50))
-                    .background(colors.background)
-                    .clickable(onClick = onDismiss)
-                    .padding(vertical = 14.dp),
-            )
-        }
-    }
-}
+                    .padding(horizontal = 20.dp)
+                    .padding(top = 20.dp, bottom = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = stringResource(
+                        R.string.settings_reported_profiles_detail_headline,
+                        report.reportedName,
+                    ),
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 17.sp,
+                    color = colors.text,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 4.dp),
+                )
 
-@Composable
-private fun DetailRow(
-    label: String,
-    value: String,
-) {
-    val colors = LocalSpectRoomColors.current
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = label,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 13.sp,
-            color = colors.secondaryText,
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = value,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 16.sp,
-            color = colors.text,
-        )
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalAlignment = Alignment.Start,
+                ) {
+                    report.createdAt?.let { createdAt ->
+                        Text(
+                            text = stringResource(
+                                R.string.settings_reported_profiles_detail_date_line,
+                                formatReportedDetailDate(createdAt),
+                            ),
+                            fontSize = 15.sp,
+                            color = colors.secondaryText,
+                        )
+                    }
+                    Text(
+                        text = stringResource(
+                            R.string.settings_reported_profiles_detail_category_line,
+                            displayCategory,
+                        ),
+                        fontSize = 15.sp,
+                        color = colors.secondaryText,
+                    )
+                    if (details.isNotEmpty()) {
+                        Text(
+                            text = stringResource(
+                                R.string.settings_reported_profiles_detail_details_line,
+                                details,
+                            ),
+                            fontSize = 15.sp,
+                            color = colors.secondaryText,
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(color = colors.border)
+
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.common_close),
+                    color = LikeGreen,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp,
+                )
+            }
+        }
     }
 }
 

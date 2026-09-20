@@ -133,6 +133,65 @@ class AppPrefsStore(context: Context) {
             }.apply()
         }
 
+    // ── Admin deleted / restored acknowledgement (iOS UserDefaults parity) ──
+
+    fun markRequiresDeletedAcknowledgement(userId: String) {
+        prefs.edit()
+            .putBoolean(pendingAdminDeletedKey(userId), true)
+            .putString(KEY_LAST_ADMIN_DELETED_UID, userId)
+            .remove(KEY_PENDING_ADMIN_RESTORED_ACK)
+            .remove(KEY_RESTORED_NOTICE_DISMISSED)
+            .apply()
+    }
+
+    fun clearRequiresDeletedAcknowledgement() {
+        val last = prefs.getString(KEY_LAST_ADMIN_DELETED_UID, null)
+        val editor = prefs.edit().remove(KEY_LAST_ADMIN_DELETED_UID)
+        if (!last.isNullOrBlank()) {
+            editor.remove(pendingAdminDeletedKey(last))
+        }
+        editor.apply()
+    }
+
+    fun hasPendingDeletedAcknowledgement(userId: String? = null): Boolean {
+        if (!userId.isNullOrBlank()) {
+            return prefs.getBoolean(pendingAdminDeletedKey(userId), false)
+        }
+        val last = prefs.getString(KEY_LAST_ADMIN_DELETED_UID, null) ?: return false
+        return prefs.getBoolean(pendingAdminDeletedKey(last), false)
+    }
+
+    fun markRequiresRestoredAcknowledgement() {
+        clearRequiresDeletedAcknowledgement()
+        prefs.edit()
+            .remove(KEY_RESTORED_NOTICE_DISMISSED)
+            .putBoolean(KEY_PENDING_ADMIN_RESTORED_ACK, true)
+            .apply()
+    }
+
+    fun clearRequiresRestoredAcknowledgement() {
+        prefs.edit().remove(KEY_PENDING_ADMIN_RESTORED_ACK).apply()
+    }
+
+    fun hasPendingRestoredAcknowledgement(): Boolean =
+        prefs.getBoolean(KEY_PENDING_ADMIN_RESTORED_ACK, false)
+
+    fun markRestoredNoticeDismissed() {
+        prefs.edit()
+            .putBoolean(KEY_RESTORED_NOTICE_DISMISSED, true)
+            .remove(KEY_PENDING_ADMIN_RESTORED_ACK)
+            .apply()
+    }
+
+    fun clearRestoredNoticeDismissed() {
+        prefs.edit().remove(KEY_RESTORED_NOTICE_DISMISSED).apply()
+    }
+
+    fun hasDismissedRestoredNotice(): Boolean =
+        prefs.getBoolean(KEY_RESTORED_NOTICE_DISMISSED, false)
+
+    private fun pendingAdminDeletedKey(userId: String) = "$KEY_PENDING_ADMIN_DELETED_PREFIX$userId"
+
     private fun applyLocale(code: String) {
         AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(code))
     }
@@ -158,6 +217,10 @@ class AppPrefsStore(context: Context) {
         private const val KEY_BLOCKED_ALERT_SKIP = "blockedAlertSkipIds"
         private const val KEY_WELCOME_LEGACY = "dontShowCompleteProfileWelcome"
         private const val KEY_WELCOME_PREFIX = "dontShowCompleteProfileWelcome."
+        private const val KEY_PENDING_ADMIN_DELETED_PREFIX = "pendingAdminDeletedAck."
+        private const val KEY_LAST_ADMIN_DELETED_UID = "lastAdminDeletedUid"
+        private const val KEY_PENDING_ADMIN_RESTORED_ACK = "pendingAdminRestoredAck"
+        private const val KEY_RESTORED_NOTICE_DISMISSED = "restoredNoticeDismissed"
 
         fun readLanguageCode(context: Context): String =
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

@@ -16,6 +16,8 @@ sealed class ModerationNotice {
     data object FreezeLifted : ModerationNotice()
     data object DeletedAcknowledgement : ModerationNotice()
     data object LoginDeleted : ModerationNotice()
+    /** Signed-out handoff after admin undelete (push). Never signs the user out. */
+    data object RestoredAcknowledgement : ModerationNotice()
 
     val signsOutOnDismiss: Boolean
         get() = when (this) {
@@ -24,8 +26,8 @@ sealed class ModerationNotice {
             BanAcknowledgement,
             LoginBanned,
             DeletedAcknowledgement,
-            LoginDeleted,
             -> true
+            // LoginDeleted is already signed out; Restored stays on auth.
             else -> false
         }
 }

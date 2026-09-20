@@ -31,6 +31,7 @@ import com.example.spectroom.data.model.UserReport
 import com.example.spectroom.R
 import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
+import com.google.firebase.auth.FirebaseAuthMultiFactorException
 import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.tasks.await
 import androidx.core.content.FileProvider
@@ -42,7 +43,9 @@ import com.example.spectroom.data.model.DiscoverDistanceOption
 import com.example.spectroom.data.model.LookingForOption
 import com.example.spectroom.data.model.MatchBreakdown
 import com.example.spectroom.data.model.MatchDisplay
+import com.example.spectroom.data.model.MessageDeleteOption
 import com.example.spectroom.data.model.MessageDisplay
+import com.example.spectroom.data.model.MessageSoftDeleteEvent
 import com.example.spectroom.data.model.MessageType
 import com.example.spectroom.data.model.ChatVideoProcessor
 import com.example.spectroom.data.model.ChatVideoValidationError
@@ -53,6 +56,7 @@ import com.example.spectroom.data.model.SpectRoomUser
 import com.example.spectroom.data.model.SwipeType
 import com.example.spectroom.data.model.UserProfileStatus
 import com.example.spectroom.data.model.VoiceMessageLimits
+import com.example.spectroom.data.remote.AccountRestoredEvents
 import com.example.spectroom.data.remote.AddressSearchRepository
 import com.example.spectroom.ui.locale.AppLocale
 import com.example.spectroom.data.remote.AddressSuggestion
@@ -117,6 +121,9 @@ data class AppUiState(
     val authNotice: String? = null,
     val authPopupTitle: String? = null,
     val isAuthLoading: Boolean = false,
+    /** Kept across restore popup / MFA so the user can reuse the same credentials. */
+    val authEmailDraft: String = "",
+    val authPasswordDraft: String = "",
     val profileSaveError: String? = null,
     val isSavingProfile: Boolean = false,
     val activeChatPartnerId: String? = null,
@@ -174,6 +181,16 @@ data class DiscoverUiState(
     val programmaticSwipe: SwipeType? = null,
     /** When set, the next programmatic pass only advances the pile (no Firestore swipe). */
     val blockPassUserId: String? = null,
+    /** Fly-back entrance after undo (iOS `UndoCardEntrance`). */
+    val undoEntrance: UndoCardEntrance? = null,
+)
+
+/** Drives the card fly-back animation when undoing a swipe (iOS parity). */
+data class UndoCardEntrance(
+    val profileId: String,
+    /** `true` = enter from left (undo pass); `false` = enter from right (undo like). */
+    val fromLeadingEdge: Boolean,
+    val token: Long = System.nanoTime(),
 )
 
 data class SocialUiState(
@@ -249,6 +266,9 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
     private val pendingIncomingImageSoundKeys = mutableSetOf<String>()
     private var savedProfilesBeforeSecondThoughts: List<ProfileCard> = emptyList()
     private var savedCardIndexBeforeSecondThoughts: Int = 0
+
+    private var lastMatchesUpdateMs: Long = 0L
+    private var lastConversationsUpdateMs: Long = 0L
 
     private val _uiState = MutableStateFlow(
         AppUiState(
@@ -378,6 +398,23 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                     if (!pendingMfaSignIn) {
                         _discoverState.value = DiscoverUiState()
                         _socialState.value = SocialUiState()
+                        clearSocialListCaches()
+                    }
+                    // Keep delete/restore popups visible after sign-out (iOS parity).
+                    when {
+                        appPrefs.hasPendingDeletedAcknowledgement() -> {
+                            when (_moderationNotice.value) {
+                                is ModerationNotice.DeletedAcknowledgement,
+                                is ModerationNotice.LoginDeleted,
+                                -> Unit
+                                else ->
+                                    _moderationNotice.value = ModerationNotice.DeletedAcknowledgement
+                            }
+                        }
+                        appPrefs.hasPendingRestoredAcknowledgement() &&
+                            !appPrefs.hasDismissedRestoredNotice() -> {
+                            presentAccountRestoredNotice()
+                        }
                     }
                 } else {
                     if (!appPrefs.hasCompletedOnboarding) {
@@ -391,6 +428,11 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                     }
                     refreshSession()
                 }
+            }
+        }
+        viewModelScope.launch {
+            AccountRestoredEvents.events.collect {
+                presentAccountRestoredNotice()
             }
         }
         viewModelScope.launch {
@@ -452,15 +494,63 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
     fun dismissModerationNotice() {
         val notice = _moderationNotice.value ?: return
         viewModelScope.launch {
-            if (notice is ModerationNotice.Warning) {
-                persistAdminWarningMessage(notice)
-            }
-            runCatching { authRepository.acknowledgeModerationNotice(notice) }
-            _moderationNotice.value = null
-            if (notice.signsOutOnDismiss) {
-                signOut()
+            when (notice) {
+                is ModerationNotice.LoginDeleted,
+                is ModerationNotice.LoginBanned,
+                is ModerationNotice.LoginBlocked,
+                -> {
+                    appPrefs.clearRequiresDeletedAcknowledgement()
+                    _moderationNotice.value = null
+                }
+                is ModerationNotice.DeletedAcknowledgement -> {
+                    // Clear notice while still authenticated, then sign out.
+                    // Do not wipe Auth — restore must keep password + MFA.
+                    _moderationNotice.value = null
+                    appPrefs.clearRequiresDeletedAcknowledgement()
+                    runCatching { authRepository.clearPendingAccountDeletedNotice() }
+                    signOut()
+                }
+                is ModerationNotice.RestoredAcknowledgement -> {
+                    _moderationNotice.value = null
+                    appPrefs.markRestoredNoticeDismissed()
+                    appPrefs.clearRequiresDeletedAcknowledgement()
+                    runCatching { authRepository.clearPendingAccountRestoredNotice() }
+                }
+                is ModerationNotice.Warning -> {
+                    persistAdminWarningMessage(notice)
+                    runCatching { authRepository.acknowledgeModerationNotice(notice) }
+                    _moderationNotice.value = null
+                }
+                else -> {
+                    runCatching { authRepository.acknowledgeModerationNotice(notice) }
+                    _moderationNotice.value = null
+                    if (notice.signsOutOnDismiss) {
+                        signOut()
+                    }
+                }
             }
         }
+    }
+
+    /** Shown from a restore push even when the user is already signed out (iOS parity). */
+    fun presentAccountRestoredNotice() {
+        // Never interrupt sign-in / MFA / an authenticated session.
+        val pendingMfa = mfaAuthRepository.hasPendingSignIn ||
+            (_uiState.value.destination == AppDestination.MFA &&
+                _uiState.value.mfaMode == MfaUiMode.SIGN_IN)
+        if (_uiState.value.isAuthenticated || pendingMfa) {
+            appPrefs.markRestoredNoticeDismissed()
+            if (_moderationNotice.value is ModerationNotice.RestoredAcknowledgement) {
+                _moderationNotice.value = null
+            }
+            viewModelScope.launch {
+                runCatching { authRepository.clearPendingAccountRestoredNoticeIfNeeded() }
+            }
+            return
+        }
+        if (appPrefs.hasDismissedRestoredNotice()) return
+        appPrefs.markRequiresRestoredAcknowledgement()
+        _moderationNotice.value = ModerationNotice.RestoredAcknowledgement
     }
 
     fun openSupportFromModeration(notice: ModerationNotice) {
@@ -1103,6 +1193,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 stopRealtime()
                 _discoverState.value = DiscoverUiState()
                 _socialState.value = SocialUiState()
+                clearSocialListCaches()
                 _deleteAccountSucceeded.value = true
                 _uiState.update {
                     it.copy(
@@ -1208,6 +1299,12 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             val trimmedEmail = email.trim()
             val trimmedPassword = password.trim()
+            _uiState.update {
+                it.copy(
+                    authEmailDraft = trimmedEmail,
+                    authPasswordDraft = trimmedPassword,
+                )
+            }
             if (trimmedEmail.isEmpty() || trimmedPassword.isEmpty()) {
                 _uiState.update {
                     it.copy(
@@ -1229,6 +1326,8 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             when (signInResult) {
                 is MfaSignInResult.Completed -> {
                     appPrefs.failedSignInAttempts = 0
+                    appPrefs.markRestoredNoticeDismissed()
+                    runCatching { authRepository.clearPendingAccountRestoredNoticeIfNeeded() }
                     runCatching { refreshSession() }.onFailure { error ->
                         handleSessionRefreshFailure(error)
                     }
@@ -1236,12 +1335,16 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 is MfaSignInResult.MfaRequired -> {
                     // Password was correct — always show MFA, never "invalid credentials".
                     appPrefs.failedSignInAttempts = 0
+                    appPrefs.markRestoredNoticeDismissed()
+                    val masked = signInResult.maskedPhone
+                        .takeIf { it.isNotBlank() }
+                        ?: localizedString(R.string.mfa_phone_fallback)
                     _uiState.update {
                         it.copy(
                             isAuthLoading = false,
                             destination = AppDestination.MFA,
                             mfaMode = MfaUiMode.SIGN_IN,
-                            mfaMaskedPhone = signInResult.maskedPhone,
+                            mfaMaskedPhone = masked,
                             mfaSmsSent = false,
                             mfaSmsFailed = false,
                             mfaSmsRateLimited = false,
@@ -1256,38 +1359,82 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun updateAuthEmailDraft(value: String) {
+        _uiState.update { it.copy(authEmailDraft = value) }
+    }
+
+    fun updateAuthPasswordDraft(value: String) {
+        _uiState.update { it.copy(authPasswordDraft = value) }
+    }
+
+    private fun localizedString(resId: Int, vararg formatArgs: Any): String {
+        val context = AppLocale.localizedContext(
+            getApplication(),
+            _uiState.value.languageCode,
+        )
+        return if (formatArgs.isEmpty()) {
+            context.getString(resId)
+        } else {
+            context.getString(resId, *formatArgs)
+        }
+    }
+
     private fun nextCredentialsErrorMessage(): String {
         val attempts = appPrefs.failedSignInAttempts + 1
         appPrefs.failedSignInAttempts = attempts
-        val app = getApplication<Application>()
         return if (attempts % 5 == 0) {
-            app.getString(R.string.auth_error_credentials_with_forgot)
+            localizedString(R.string.auth_error_credentials_with_forgot)
         } else {
-            app.getString(R.string.auth_error_credentials)
+            localizedString(R.string.auth_error_credentials)
         }
     }
 
     private fun isInvalidCredentialsError(error: Throwable): Boolean {
+        // Never treat MFA / second-factor challenges as a wrong password.
+        if (error is FirebaseAuthMultiFactorException) return false
+        var current: Throwable? = error
+        while (current != null) {
+            if (current is FirebaseAuthMultiFactorException) return false
+            current = current.cause
+        }
         if (error is FirebaseAuthInvalidCredentialsException) return true
         val code = (error as? FirebaseAuthException)?.errorCode.orEmpty()
+        if (code.contains("SECOND_FACTOR", ignoreCase = true)) return false
         if (code.equals("ERROR_INVALID_CREDENTIAL", ignoreCase = true)) return true
         if (code.equals("ERROR_USER_NOT_FOUND", ignoreCase = true)) return true
         if (code.equals("ERROR_WRONG_PASSWORD", ignoreCase = true)) return true
         val lower = error.message.orEmpty().lowercase()
+        if (lower.contains("second factor") || lower.contains("multi-factor") || lower.contains("mfa")) {
+            return false
+        }
         return lower.contains("wrong password") ||
             lower.contains("no user record") ||
             (lower.contains("invalid") && lower.contains("credential"))
     }
 
+    private fun isUserDisabledError(error: Throwable): Boolean {
+        var current: Throwable? = error
+        while (current != null) {
+            val code = (current as? FirebaseAuthException)?.errorCode.orEmpty()
+            if (code.equals("ERROR_USER_DISABLED", ignoreCase = true)) return true
+            current = current.cause
+        }
+        val lower = error.message.orEmpty().lowercase()
+        return lower.contains("disabled by an administrator") ||
+            lower.contains("user account has been disabled") ||
+            lower.contains("user is disabled")
+    }
+
     private fun handleSignInFailure(error: Throwable) {
         val message = error.message.orEmpty()
         val lower = message.lowercase()
-        val app = getApplication<Application>()
         // Soft-deleted accounts must look like invalid credentials (iOS parity).
         val softPendingDeletion = lower.contains("recently deleted")
-        val adminDeleted = lower.contains("account has been deleted") && !softPendingDeletion
+        val adminDeleted = (lower.contains("account has been deleted") && !softPendingDeletion) ||
+            isUserDisabledError(error)
         when {
             adminDeleted -> {
+                // Same Account Deleted overlay as the live-session deleted popup.
                 _moderationNotice.value = ModerationNotice.LoginDeleted
                 _uiState.update { it.copy(isAuthLoading = false, authError = null, authNotice = null) }
             }
@@ -1318,8 +1465,8 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                     it.copy(
                         isAuthLoading = false,
                         authNotice = null,
-                        authError = message.ifBlank { app.getString(R.string.auth_error_generic) },
-                        authPopupTitle = app.getString(R.string.auth_notice),
+                        authError = message.ifBlank { localizedString(R.string.auth_error_generic) },
+                        authPopupTitle = localizedString(R.string.auth_notice),
                     )
                 }
             }
@@ -1327,14 +1474,13 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun handleSessionRefreshFailure(error: Throwable) {
-        val app = getApplication<Application>()
         val message = error.message.orEmpty()
         _uiState.update {
             it.copy(
                 isAuthLoading = false,
                 authNotice = null,
-                authError = message.ifBlank { app.getString(R.string.auth_error_generic) },
-                authPopupTitle = app.getString(R.string.auth_notice),
+                authError = message.ifBlank { localizedString(R.string.auth_error_generic) },
+                authPopupTitle = localizedString(R.string.auth_notice),
             )
         }
     }
@@ -1343,15 +1489,19 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             _uiState.update { it.copy(isAuthLoading = true, authError = null, authPopupTitle = null) }
             runCatching {
-                when (_uiState.value.mfaMode) {
+                val mode = _uiState.value.mfaMode
+                when (mode) {
                     MfaUiMode.SIGN_IN -> mfaAuthRepository.confirmSignInMfa(code)
                     MfaUiMode.ENROLL -> mfaAuthRepository.confirmEnroll(code)
                 }
                 appPrefs.pendingMfaPhoneE164 = null
+                if (mode == MfaUiMode.SIGN_IN) {
+                    appPrefs.markRestoredNoticeDismissed()
+                    runCatching { authRepository.clearPendingAccountRestoredNoticeIfNeeded() }
+                }
                 refreshSession()
             }.onFailure { error ->
-                val app = getApplication<Application>()
-                val mapped = mapMfaConfirmError(error, app)
+                val mapped = mapMfaConfirmError(error)
                 _uiState.update {
                     it.copy(
                         isAuthLoading = false,
@@ -1364,7 +1514,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    private fun mapMfaConfirmError(error: Throwable, app: Application): String {
+    private fun mapMfaConfirmError(error: Throwable): String {
         val message = error.message.orEmpty().lowercase()
         val code = (error as? com.google.firebase.auth.FirebaseAuthException)?.errorCode.orEmpty()
         return when {
@@ -1372,11 +1522,11 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 code.contains("MISSING_VERIFICATION_CODE", ignoreCase = true) ||
                 message.contains("invalid verification code") ||
                 message.contains("invalid code") ->
-                app.getString(R.string.mfa_error_invalid_code)
+                localizedString(R.string.mfa_error_invalid_code)
             code.contains("SESSION_EXPIRED", ignoreCase = true) ||
                 message.contains("session") && message.contains("expir") ->
-                app.getString(R.string.mfa_error_session)
-            else -> error.message ?: app.getString(R.string.mfa_error_invalid_code)
+                localizedString(R.string.mfa_error_session)
+            else -> error.message ?: localizedString(R.string.mfa_error_invalid_code)
         }
     }
 
@@ -1795,7 +1945,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 )
             }
             loadChatMessages(partnerId)
-            refreshConversations()
+            refreshConversations(force = true)
             _socialState.update { it.copy(isSendingMessage = false) }
         }
     }
@@ -1914,6 +2064,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         discoverDeckCache.clear(accountKey)
         _discoverState.value = DiscoverUiState()
         _socialState.value = SocialUiState()
+        clearSocialListCaches()
         _uiState.update {
             it.copy(
                 isNewSignup = false,
@@ -1942,6 +2093,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             authRepository.signOut()
             _discoverState.value = DiscoverUiState()
             _socialState.value = SocialUiState()
+            clearSocialListCaches()
             if (!appPrefs.dontShowWelcomeAgain) {
                 appPrefs.hasCompletedOnboarding = false
             }
@@ -2033,7 +2185,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             runCatching { authRepository.updateMessagesTabActive(false) }
             runCatching { authRepository.updateOpenConversation(null) }
         }
-        refreshMatches()
+        refreshMatches(force = true)
     }
 
     fun openComposeMessage(profile: ProfileCard) {
@@ -2337,7 +2489,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             loadChatMessages(partnerId)
             establishChatSoundBaseline()
             runCatching { messageRepository.markMessagesAsRead(partnerId) }
-            refreshConversations()
+            refreshConversations(force = true)
             val theyBlockedMe = if (AdminSender.isAdmin(partnerId)) {
                 false
             } else {
@@ -2489,7 +2641,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             _socialState.update { it.copy(isSendingMessage = true) }
             runCatching { messageRepository.sendTextMessage(partnerId, trimmed) }
             loadChatMessages(partnerId)
-            refreshConversations()
+            refreshConversations(force = true)
             _socialState.update { it.copy(isSendingMessage = false) }
         }
     }
@@ -2555,7 +2707,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                         isSendingMessage = false,
                     )
                 }
-                refreshConversations()
+                refreshConversations(force = true)
             } else {
                 _socialState.update { state ->
                     state.copy(
@@ -2612,6 +2764,156 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
 
     fun clearVideoValidationError() {
         _socialState.update { it.copy(videoValidationError = null) }
+    }
+
+    fun reactToChatMessage(message: MessageDisplay, emoji: String) {
+        val partnerId = _uiState.value.activeChatPartnerId ?: return
+        if (AdminSender.isAdmin(partnerId)) return
+        if (message.isDeleted || message.content.startsWith("pending://")) return
+        if (emoji !in MessageDisplay.QUICK_REACTION_EMOJIS) return
+        val uid = messagingUserId() ?: return
+        val isOutgoing = message.senderId == uid
+        val updated = message.togglingReaction(emoji, uid)
+        _socialState.update { state ->
+            state.copy(
+                chatMessages = state.chatMessages.map {
+                    if (it.id == message.id) updated else it
+                },
+            )
+        }
+        viewModelScope.launch {
+            runCatching {
+                messageRepository.setMessageReaction(
+                    messageId = message.id,
+                    partnerId = partnerId,
+                    isOutgoing = isOutgoing,
+                    emoji = emoji,
+                    reactions = updated.reactions,
+                )
+            }.onFailure {
+                _socialState.update { state ->
+                    state.copy(
+                        chatMessages = state.chatMessages.map {
+                            if (it.id == message.id) message else it
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    fun softDeleteChatMessage(message: MessageDisplay, option: MessageDeleteOption) {
+        val partnerId = _uiState.value.activeChatPartnerId ?: return
+        if (AdminSender.isAdmin(partnerId)) return
+        if (message.isDeleted || message.content.startsWith("pending://")) return
+        val uid = messagingUserId() ?: return
+        val isOutgoing = message.senderId == uid
+        val scope = if (
+            option == MessageDeleteOption.FOR_EVERYONE && message.canDeleteForEveryone()
+        ) {
+            MessageRepository.MessageDeleteScope.FOR_EVERYONE
+        } else {
+            MessageRepository.MessageDeleteScope.FOR_ME
+        }
+        val marked = message.markingDeleted(forEveryone = scope == MessageRepository.MessageDeleteScope.FOR_EVERYONE)
+        _socialState.update { state ->
+            state.copy(
+                chatMessages = state.chatMessages.map {
+                    if (it.id == message.id) marked else it
+                },
+            )
+        }
+        refreshConversations(force = true)
+        viewModelScope.launch {
+            runCatching {
+                messageRepository.softDeleteMessage(
+                    messageId = message.id,
+                    partnerId = partnerId,
+                    isOutgoing = isOutgoing,
+                    scope = scope,
+                )
+            }.onFailure {
+                _socialState.update { state ->
+                    state.copy(
+                        chatMessages = state.chatMessages.map {
+                            if (it.id == message.id) message else it
+                        },
+                    )
+                }
+            }
+            refreshConversations(force = true)
+        }
+    }
+
+    fun submitReportFromChat(
+        reason: ProfileReportReason,
+        details: String?,
+        alsoBlock: Boolean,
+    ) {
+        val partnerId = _uiState.value.activeChatPartnerId ?: return
+        if (AdminSender.isAdmin(partnerId)) return
+        val partnerName = _uiState.value.activeChatPartnerName.orEmpty().ifBlank { "User" }
+        val partnerPhoto = _uiState.value.activeChatPartnerPhoto
+        viewModelScope.launch {
+            val profile = _uiState.value.viewingProfile?.takeIf { it.userId == partnerId }
+                ?: runCatching {
+                    ProfileCard(
+                        userId = partnerId,
+                        name = partnerName,
+                        age = 0,
+                        bio = "",
+                        interests = emptyList(),
+                        distance = "",
+                        imageURL = partnerPhoto,
+                        gender = "",
+                        interestedIn = emptyList(),
+                        lookingFor = emptyList(),
+                        photos = emptyList(),
+                        lifestyle = "",
+                        shareLifestyle = false,
+                        bodyType = "",
+                        shareBodyType = false,
+                        preferredAgeMin = 18,
+                        preferredAgeMax = 80,
+                        isOnline = false,
+                        lastSeen = java.util.Date(),
+                        idealFirstDate = emptyList(),
+                        shareIdealFirstDate = false,
+                    )
+                }.getOrThrow()
+            if (alsoBlock) {
+                runCatching { moderationRepository.blockUser(partnerId, partnerName) }
+                refreshBlockLists()
+            }
+            runCatching {
+                submitReportForProfile(profile, reason.storageCategory, details)
+            }
+        }
+    }
+
+    private fun applyMessageSoftDelete(event: MessageSoftDeleteEvent) {
+        val hasDelete = event.deletedForEveryone || event.deletedForViewer
+        val hasReactions = event.reactions != null
+        if (!hasDelete && !hasReactions) return
+        val openPartner = _uiState.value.activeChatPartnerId
+        if (openPartner == event.partnerId) {
+            _socialState.update { state ->
+                state.copy(
+                    chatMessages = state.chatMessages.map { message ->
+                        if (message.id != event.messageId) return@map message
+                        var updated = message
+                        if (hasDelete) {
+                            updated = updated.markingDeleted(forEveryone = event.deletedForEveryone)
+                        }
+                        if (event.reactions != null) {
+                            updated = updated.withReactions(event.reactions)
+                        }
+                        updated
+                    },
+                )
+            }
+        }
+        refreshConversations(force = true)
     }
 
     fun videoValidationTitleRes(error: ChatVideoValidationError): Int = when (error) {
@@ -2733,7 +3035,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                         isSendingMessage = false,
                     )
                 }
-                refreshConversations()
+                refreshConversations(force = true)
             } else {
                 val error = result.exceptionOrNull()
                 val validation = when {
@@ -2851,6 +3153,34 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 shareIdealFirstDate = false,
             ),
         )
+    }
+
+    /**
+     * Block the open chat partner without showing [pendingBlockProfile] confirmation UI.
+     * Used by chat "Report & Block" so the reason sheet is not covered by "Block …?".
+     */
+    fun blockActiveChatPartnerQuietly() {
+        val id = _uiState.value.activeChatPartnerId ?: return
+        val name = _uiState.value.activeChatPartnerName.orEmpty().ifBlank { "User" }
+        addBlockedUserLocally(id, name)
+        _uiState.update {
+            it.copy(
+                chatBlockedByPartner = true,
+                pendingBlockProfile = null,
+            )
+        }
+        val discover = _discoverState.value
+        val isTopDiscoverCard = discover.profiles.getOrNull(discover.currentIndex)?.userId == id
+        if (isTopDiscoverCard) {
+            _discoverState.update { it.copy(blockPassUserId = id) }
+        } else {
+            removeHiddenBlockedProfilesFromDeck(setOf(id))
+        }
+        viewModelScope.launch {
+            runCatching { moderationRepository.blockUser(id, name) }
+            refreshBlockLists()
+            refreshSocial()
+        }
     }
 
     fun dismissBlockConfirmation() {
@@ -3034,19 +3364,20 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun unblockUser(userId: String) {
+        // Optimistically clear local block so Messages / Settings update immediately.
+        _socialState.update { state ->
+            state.copy(blockedUsers = state.blockedUsers.filter { it.id != userId })
+        }
+        _uiState.update { state ->
+            val user = state.currentUser ?: return@update state
+            state.copy(
+                currentUser = user.copy(
+                    blockedUsers = user.blockedUsers.filter { it.id != userId },
+                ),
+            )
+        }
         viewModelScope.launch {
             runCatching { moderationRepository.unblockUser(userId) }
-            _socialState.update { state ->
-                state.copy(blockedUsers = state.blockedUsers.filter { it.id != userId })
-            }
-            _uiState.update { state ->
-                val user = state.currentUser ?: return@update state
-                state.copy(
-                    currentUser = user.copy(
-                        blockedUsers = user.blockedUsers.filter { it.id != userId },
-                    ),
-                )
-            }
             if (_uiState.value.activeChatPartnerId == userId) {
                 val theyBlockedMe = runCatching {
                     moderationRepository.isBlockedBy(userId)
@@ -3055,7 +3386,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             }
             refreshBlockLists()
             loadDiscoverDeck()
-            refreshConversations()
+            refreshConversations(force = true)
         }
     }
 
@@ -3352,6 +3683,10 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         private const val PENDING_IMAGE_PREFIX = "pending://"
         /** Protect Android plan changes from being overwritten by stale Firestore cache. */
         private const val LOCAL_PLAN_WRITE_GRACE_MS = 15_000L
+        /** iOS `getCachedOrFreshMatches` TTL. */
+        private const val MATCHES_CACHE_TTL_MS = 60_000L
+        /** iOS `getCachedOrFreshConversations` TTL. */
+        private const val CONVERSATIONS_CACHE_TTL_MS = 30_000L
     }
 
     fun swipe(action: SwipeType) {
@@ -3394,14 +3729,14 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                     .getOrDefault(false)
                 if (matched) {
                     presentMatchNotification(profile)
-                    refreshMatches()
+                    refreshMatches(force = true)
                     return@launch
                 }
                 repeat(4) {
                     delay(500)
                     if (discoverRepository.matchExists(profile.userId)) {
                         presentMatchNotification(profile)
-                        refreshMatches()
+                        refreshMatches(force = true)
                         return@launch
                     }
                 }
@@ -3418,6 +3753,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
             _showUndoLimitOverlay.value = true
             return
         }
+        val swipeType = state.lastSwipeType
         val count = if (state.lastSwipeCountedTowardLimit) {
             dailyLimitStore.undoLastSwipe(accountKey)
         } else {
@@ -3432,13 +3768,22 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 lastSwipedProfile = null,
                 lastSwipeType = null,
                 lastSwipeCountedTowardLimit = false,
+                programmaticSwipe = null,
+                undoEntrance = UndoCardEntrance(
+                    profileId = profile.userId,
+                    fromLeadingEdge = swipeType == SwipeType.PASS,
+                ),
             )
         }
         persistDiscoverDeckCache()
         viewModelScope.launch {
             runCatching { discoverRepository.undoLastSwipe(profile.userId) }
-            refreshMatches()
+            refreshMatches(force = true)
         }
+    }
+
+    fun clearUndoEntrance() {
+        _discoverState.update { it.copy(undoEntrance = null) }
     }
 
     fun useSecondThoughts() {
@@ -3533,6 +3878,10 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         refreshConversations()
     }
 
+    fun refreshMatchesNow() {
+        refreshMatches(force = true)
+    }
+
     /** Fetch blocked / blocked-by lists so Settings can show an up-to-date count. */
     fun refreshBlockLists() {
         viewModelScope.launch {
@@ -3546,22 +3895,70 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    private fun refreshMatches() {
+    /**
+     * iOS parity (`getCachedOrFreshMatches`): reuse in-memory matches for 60s so
+     * tab switches don't show a loading spinner or refetch every time.
+     */
+    private fun refreshMatches(force: Boolean = false) {
         val currentUser = _uiState.value.currentUser ?: return
+        val cached = _socialState.value.matches
+        val cacheAgeMs = System.currentTimeMillis() - lastMatchesUpdateMs
+        if (!force &&
+            cached.isNotEmpty() &&
+            lastMatchesUpdateMs > 0L &&
+            cacheAgeMs in 0 until MATCHES_CACHE_TTL_MS
+        ) {
+            return
+        }
         viewModelScope.launch {
-            _socialState.update { it.copy(isLoadingMatches = true) }
-            val matches = runCatching { matchRepository.fetchMatches(currentUser) }.getOrDefault(emptyList())
+            val showLoading = cached.isEmpty()
+            if (showLoading) {
+                _socialState.update { it.copy(isLoadingMatches = true) }
+            }
+            val matches = runCatching { matchRepository.fetchMatches(currentUser) }
+                .getOrElse { cached }
+            lastMatchesUpdateMs = System.currentTimeMillis()
             _socialState.update { it.copy(matches = matches, isLoadingMatches = false) }
         }
     }
 
-    private fun refreshConversations() {
+    private fun clearMatchesCache() {
+        lastMatchesUpdateMs = 0L
+    }
+
+    private fun clearConversationsCache() {
+        lastConversationsUpdateMs = 0L
+    }
+
+    private fun clearSocialListCaches() {
+        clearMatchesCache()
+        clearConversationsCache()
+    }
+
+    /**
+     * iOS parity (`getCachedOrFreshConversations`): reuse conversation list for 30s
+     * so Messages tab switches don't refetch / flash loading every time.
+     */
+    private fun refreshConversations(force: Boolean = false) {
         val currentUser = _uiState.value.currentUser ?: return
+        val cached = _socialState.value.conversations
+        val cacheAgeMs = System.currentTimeMillis() - lastConversationsUpdateMs
+        if (!force &&
+            cached.isNotEmpty() &&
+            lastConversationsUpdateMs > 0L &&
+            cacheAgeMs in 0 until CONVERSATIONS_CACHE_TTL_MS
+        ) {
+            return
+        }
         viewModelScope.launch {
-            _socialState.update { it.copy(isLoadingMessages = true) }
+            val showLoading = cached.isEmpty()
+            if (showLoading) {
+                _socialState.update { it.copy(isLoadingMessages = true) }
+            }
             val conversations = runCatching {
                 messageRepository.fetchConversationList(currentUser)
-            }.getOrDefault(emptyList())
+            }.getOrElse { cached }
+            lastConversationsUpdateMs = System.currentTimeMillis()
             val unread = conversations.sumOf { it.unreadCount }
             _socialState.update { it.copy(conversations = conversations, isLoadingMessages = false) }
             _uiState.update { it.copy(unreadMessagesCount = unread) }
@@ -3631,7 +4028,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         if (hasNewIncoming) {
             handleNewIncomingChatMessages(uniqueNew.filter { it.senderId == partnerId })
             runCatching { messageRepository.markMessagesAsRead(partnerId) }
-            refreshConversations()
+            refreshConversations(force = true)
         }
     }
 
@@ -3639,20 +4036,20 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         stopRealtime()
         val matchesJob = viewModelScope.launch {
             matchRepository.observeRecentMatches { _uiState.value.currentUser }.collect { match ->
-                refreshMatches()
+                refreshMatches(force = true)
                 presentMatchNotification(match.otherUser, matchId = match.id)
             }
         }
         val matchCountJob = viewModelScope.launch {
             matchRepository.observeMatchCount().collect {
-                refreshMatches()
+                refreshMatches(force = true)
             }
         }
         val messagesJob = viewModelScope.launch {
             messageRepository.observeIncomingMessageEvents().collect { event ->
                 val hint = event ?: return@collect
                 if (isMessagingBlocked(hint.senderId) || isFromCurrentUser(hint.senderId)) return@collect
-                refreshConversations()
+                refreshConversations(force = true)
                 val state = _uiState.value
                 val openPartnerId = state.activeChatPartnerId
                 val chatIsOpenWithSender = openPartnerId == hint.senderId
@@ -3697,10 +4094,18 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 }
             }
         }
+        val softDeleteJob = viewModelScope.launch {
+            messageRepository.observeMessageSoftDeletes().collect { event ->
+                applyMessageSoftDelete(event)
+            }
+        }
         val moderationJob = viewModelScope.launch {
             authRepository.observeModerationNotices().collect { notice ->
                 if (notice is ModerationNotice.Warning) {
                     persistAdminWarningMessage(notice)
+                }
+                if (notice is ModerationNotice.DeletedAcknowledgement) {
+                    authRepository.currentUid?.let { appPrefs.markRequiresDeletedAcknowledgement(it) }
                 }
                 if (notice != null) {
                     _moderationNotice.value = notice
@@ -3749,7 +4154,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 ensureAutomaticProfileBoost()
             }
         }
-        realtimeJobs = listOf(matchesJob, matchCountJob, messagesJob, moderationJob, planTierJob)
+        realtimeJobs = listOf(matchesJob, matchCountJob, messagesJob, softDeleteJob, moderationJob, planTierJob)
     }
 
     private fun stopRealtime() {
@@ -3789,6 +4194,12 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 return
             }
             is AccessGate.Deleted -> {
+                if (gate.byAdmin) {
+                    authRepository.currentUid?.let { appPrefs.markRequiresDeletedAcknowledgement(it) }
+                    _moderationNotice.value = ModerationNotice.DeletedAcknowledgement
+                    // Keep session briefly so the deletion acknowledgement popup can show.
+                    return
+                }
                 _moderationNotice.value = ModerationNotice.LoginDeleted
                 _uiState.update {
                     it.copy(
@@ -3869,7 +4280,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 createdAtSeconds = warning.createdAtSeconds,
             )
         }
-        refreshConversations()
+        refreshConversations(force = true)
     }
 
     private fun syncFcmToken() {
@@ -3892,7 +4303,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 age = 24 + index,
                 bio = "Looking for genuine connection around Stockholm.",
                 interests = listOf("Photography", "Music", "Cooking"),
-                distance = "${3 + index * 2} km",
+                distance = "${3 + index * 2} km away",
                 imageURL = "https://picsum.photos/seed/demo$index/800/1000",
                 gender = if (index % 2 == 0) "Woman" else "Man",
                 interestedIn = listOf("Anyone"),

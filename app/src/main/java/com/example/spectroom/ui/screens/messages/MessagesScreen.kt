@@ -44,6 +44,7 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
@@ -59,6 +60,7 @@ import coil3.compose.AsyncImage
 import com.example.spectroom.R
 import com.example.spectroom.data.model.AdminSender
 import com.example.spectroom.data.model.ConversationDisplay
+import com.example.spectroom.ui.components.BlockedProfileLabel
 import com.example.spectroom.ui.components.TabBarBodyHeight
 import com.example.spectroom.ui.components.UnreadCountBadge
 import com.example.spectroom.ui.screens.settings.UnblockConfirmationOverlay
@@ -86,7 +88,7 @@ fun MessagesScreen(
     isLoading: Boolean = false,
     hasMatches: Boolean = false,
     historyMatchIds: Set<String> = emptySet(),
-    isUserBlocked: (String) -> Boolean = { false },
+    blockedUserIds: Set<String> = emptySet(),
     blockedAtForUser: (String) -> Date? = { null },
     onSearchQueryChange: (String) -> Unit = {},
     onOpenConversation: (ConversationDisplay) -> Unit,
@@ -156,7 +158,7 @@ fun MessagesScreen(
                             items(filtered, key = { it.id }) { conversation ->
                                 ConversationRow(
                                     conversation = conversation,
-                                    blockedByMe = isUserBlocked(conversation.otherUserId),
+                                    blockedByMe = conversation.otherUserId in blockedUserIds,
                                     blockedAt = blockedAtForUser(conversation.otherUserId),
                                     onClick = { onOpenConversation(conversation) },
                                     onRequestUnblock = { pendingUnblock = conversation },
@@ -435,50 +437,61 @@ private fun ConversationRow(
     } ?: stringResource(R.string.settings_blocked_users_no_date)
 
     if (blockedByMe) {
-        Row(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
-                .background(colors.card)
-                .padding(horizontal = 16.dp, vertical = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                .background(colors.card.copy(alpha = 0.55f)),
         ) {
             Row(
                 modifier = Modifier
-                    .weight(1f)
-                    .clickable(onClick = onClick),
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                ConversationAvatar(conversation = conversation, firstName = firstName)
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .alpha(0.28f)
+                        .clickable(onClick = onClick),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Text(
-                        text = conversation.otherUserName,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 17.sp,
-                        color = colors.text,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = blockedDateText,
-                        color = colors.secondaryText,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    ConversationAvatar(conversation = conversation, firstName = firstName)
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = conversation.otherUserName,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 17.sp,
+                            color = colors.text,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = blockedDateText,
+                            color = colors.secondaryText,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
+                Text(
+                    text = stringResource(R.string.settings_blocked_users_unblock),
+                    color = LikeGreen,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 15.sp,
+                    modifier = Modifier.clickable(onClick = onRequestUnblock),
+                )
             }
-            Text(
-                text = stringResource(R.string.settings_blocked_users_unblock),
-                color = LikeGreen,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 15.sp,
-                modifier = Modifier.clickable(onClick = onRequestUnblock),
+            BlockedProfileLabel(
+                dimmed = false,
+                slanted = false,
+                modifier = Modifier.align(Alignment.Center),
             )
         }
         return
@@ -514,7 +527,11 @@ private fun ConversationRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = conversation.lastMessage,
+                text = if (conversation.lastMessageDeleted) {
+                    stringResource(R.string.messages_deleted_placeholder)
+                } else {
+                    conversation.lastMessage
+                },
                 color = colors.secondaryText,
                 fontSize = 15.sp,
                 maxLines = 1,

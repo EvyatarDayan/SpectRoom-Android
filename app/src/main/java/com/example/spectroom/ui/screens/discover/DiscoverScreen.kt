@@ -37,7 +37,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material3.CircularProgressIndicator
@@ -67,6 +67,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -88,6 +90,7 @@ import com.example.spectroom.data.model.EnergyLevel
 import com.example.spectroom.data.model.PlanTier
 import com.example.spectroom.data.model.ProfileCard
 import com.example.spectroom.data.model.SwipeType
+import com.example.spectroom.domain.DiscoverEligibility
 import com.example.spectroom.ui.theme.DistanceAccent
 import com.example.spectroom.ui.theme.EnergyLow
 import com.example.spectroom.ui.theme.LikeGreen
@@ -96,6 +99,9 @@ import com.example.spectroom.ui.theme.LocalSpectRoomColors
 import com.example.spectroom.ui.theme.PassRed
 import com.example.spectroom.ui.theme.TabSelected
 import com.example.spectroom.viewmodel.DiscoverUiState
+import com.example.spectroom.viewmodel.UndoCardEntrance
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 private val CardCorner = 24.dp
@@ -123,6 +129,17 @@ private val DistancePickerRowHeight =
 private val PickerPanelTopOrigin = TransformOrigin(0.5f, 0f)
 private val PickerPanelOpenSpring = spring<Float>(dampingRatio = 0.78f, stiffness = 220f)
 private val PickerPanelCloseSpring = spring<Float>(dampingRatio = 0.86f, stiffness = 340f)
+
+/** Ensures legacy cached labels like "1.5 km" render as iOS-style "1.5 km away". */
+@Composable
+private fun discoverDistanceLabel(raw: String): String {
+    val context = LocalContext.current
+    return remember(raw) {
+        DiscoverEligibility.upgradeDistanceLabel(raw) { amount ->
+            context.getString(R.string.search_distance_km, amount)
+        }
+    }
+}
 
 private fun pickerPanelEnterTransition() =
     fadeIn(animationSpec = PickerPanelOpenSpring) +
@@ -154,6 +171,7 @@ fun DiscoverScreen(
     onProgrammaticSwipe: (SwipeType) -> Unit = {},
     onProgrammaticSwipeComplete: (SwipeType) -> Unit = {},
     onUndo: () -> Unit,
+    onUndoEntranceConsumed: () -> Unit = {},
     onOpenProfile: (ProfileCard) -> Unit = {},
     onUpdateEnergyLevel: (Int) -> Unit = {},
     onSetDistance: (DiscoverDistanceOption) -> Unit = {},
@@ -223,6 +241,7 @@ fun DiscoverScreen(
                             depth = depth,
                             isTopCard = depth == 0,
                             programmaticSwipe = if (depth == 0) state.programmaticSwipe else null,
+                            undoEntrance = if (depth == 0) state.undoEntrance else null,
                             isDailyLimitReached = reachedLimit,
                             maxSwipesPerDay = maxSwipesPerDay,
                             planTier = planTier,
@@ -230,6 +249,7 @@ fun DiscoverScreen(
                             onUpgradePlans = onUpgradePlans,
                             onSwiped = onSwipe,
                             onProgrammaticSwipeComplete = onProgrammaticSwipeComplete,
+                            onUndoEntranceConsumed = onUndoEntranceConsumed,
                             onOpen = {
                                 if (!reachedLimit) onOpenProfile(stacked)
                             },
@@ -846,6 +866,7 @@ private fun SwipeableProfileCard(
     depth: Int = 0,
     isTopCard: Boolean = true,
     programmaticSwipe: SwipeType? = null,
+    undoEntrance: UndoCardEntrance? = null,
     isDailyLimitReached: Boolean = false,
     maxSwipesPerDay: Int = 10,
     planTier: PlanTier = PlanTier.FREE,
@@ -853,19 +874,68 @@ private fun SwipeableProfileCard(
     onUpgradePlans: () -> Unit = {},
     onSwiped: (SwipeType) -> Unit,
     onProgrammaticSwipeComplete: (SwipeType) -> Unit = {},
+    onUndoEntranceConsumed: () -> Unit = {},
     onOpen: () -> Unit,
 ) {
     var offsetX by remember(profile.userId) { mutableFloatStateOf(0f) }
     var offsetY by remember(profile.userId) { mutableFloatStateOf(0f) }
+    var entranceRotation by remember(profile.userId) { mutableStateOf<Float?>(null) }
     var isAnimatingProgrammaticSwipe by remember(profile.userId) { mutableStateOf(false) }
-    val rotation = if (isTopCard && !isDailyLimitReached) offsetX / 20f else 0f
+    var isPlayingUndoEntrance by remember(profile.userId) { mutableStateOf(false) }
+    val dragRotation = if (isTopCard && !isDailyLimitReached) {
+        (offsetX / 20f).coerceIn(-28f, 28f)
+    } else {
+        0f
+    }
+    val rotation = entranceRotation ?: dragRotation
     val density = LocalDensity.current
+    val configuration = LocalConfiguration.current
     val threshold = with(density) { 100.dp.toPx() }
-    val handleGestures = rememberUpdatedState(isTopCard && !isDailyLimitReached && !isAnimatingProgrammaticSwipe)
+    val handleGestures = rememberUpdatedState(
+        isTopCard && !isDailyLimitReached && !isAnimatingProgrammaticSwipe && !isPlayingUndoEntrance,
+    )
+    val onUndoEntranceConsumedState = rememberUpdatedState(onUndoEntranceConsumed)
+
+    // iOS undo fly-back: snap off-screen, then spring to center.
+    LaunchedEffect(undoEntrance?.token, isTopCard) {
+        val entrance = undoEntrance ?: return@LaunchedEffect
+        if (!isTopCard || entrance.profileId != profile.userId) return@LaunchedEffect
+        isPlayingUndoEntrance = true
+        isAnimatingProgrammaticSwipe = false
+        val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+        val startX = if (entrance.fromLeadingEdge) -screenWidthPx * 1.15f else screenWidthPx * 1.15f
+        val startRot = if (entrance.fromLeadingEdge) -28f else 28f
+        offsetX = startX
+        offsetY = 0f
+        entranceRotation = startRot
+        // Let the off-screen frame paint before springing in (iOS next-run-loop).
+        delay(16)
+        launch {
+            animate(
+                initialValue = startX,
+                targetValue = 0f,
+                animationSpec = spring(
+                    dampingRatio = 0.78f,
+                    stiffness = 180f,
+                ),
+            ) { value, _ -> offsetX = value }
+        }
+        animate(
+            initialValue = startRot,
+            targetValue = 0f,
+            animationSpec = spring(
+                dampingRatio = 0.78f,
+                stiffness = 180f,
+            ),
+        ) { value, _ -> entranceRotation = value }
+        entranceRotation = null
+        isPlayingUndoEntrance = false
+        onUndoEntranceConsumedState.value()
+    }
 
     LaunchedEffect(programmaticSwipe) {
         val action = programmaticSwipe ?: return@LaunchedEffect
-        if (!isTopCard || isDailyLimitReached) return@LaunchedEffect
+        if (!isTopCard || isDailyLimitReached || isPlayingUndoEntrance) return@LaunchedEffect
         isAnimatingProgrammaticSwipe = true
         val stampOffset = with(density) { 170.dp.toPx() }
         val offScreen = with(density) { 1000.dp.toPx() }
@@ -915,7 +985,7 @@ private fun SwipeableProfileCard(
             .rotate(rotation)
             .then(
                 if (!isDailyLimitReached) {
-                    Modifier.pointerInput(profile.userId, isAnimatingProgrammaticSwipe) {
+                    Modifier.pointerInput(profile.userId, isAnimatingProgrammaticSwipe, isPlayingUndoEntrance) {
                         // Attach gestures to every visible stacked card so the next card is ready
                         // before it becomes top (avoids losing the first tap/swipe after promotion).
                         awaitEachGesture {
@@ -1126,6 +1196,7 @@ private fun ProfileCardContent(profile: ProfileCard) {
         firstName = firstName,
         percentColor = matchColor,
     )
+    val distanceLabel = discoverDistanceLabel(profile.distance)
 
     Column(
         modifier = Modifier
@@ -1199,13 +1270,14 @@ private fun ProfileCardContent(profile: ProfileCard) {
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
             ) {
                 Icon(
-                    imageVector = Icons.Filled.LocationOn,
+                    // iOS SearchView uses SF Symbol `location.fill` (arrowhead), not a map pin.
+                    imageVector = Icons.Filled.NearMe,
                     contentDescription = null,
                     tint = Color.White,
-                    modifier = Modifier.size(14.dp),
+                    modifier = Modifier.size(13.dp),
                 )
                 Text(
-                    text = profile.distance,
+                    text = distanceLabel,
                     color = Color.White,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -1252,7 +1324,7 @@ private fun ProfileCardContent(profile: ProfileCard) {
                 .weight(1f)
                 .padding(horizontal = 18.dp)
                 .padding(top = 16.dp, bottom = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.Top),
+            verticalArrangement = Arrangement.spacedBy(30.dp, Alignment.Top),
         ) {
             Text(
                 text = profile.bio.ifBlank { " " },
@@ -1284,6 +1356,8 @@ private fun ProfileCardContent(profile: ProfileCard) {
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }

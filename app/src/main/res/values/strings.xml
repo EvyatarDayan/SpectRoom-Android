@@ -145,8 +145,12 @@
     <string name="settings_reported_profiles_since">Reported %1$s</string>
     <string name="settings_reported_profiles_no_date">Reported</string>
     <string name="settings_reported_profiles_detail_title">Report details</string>
-    <string name="settings_reported_profiles_detail_headline">%1$s was reported on %2$s</string>
-    <string name="settings_reported_profiles_detail_headline_no_date">%1$s was reported</string>
+    <string name="settings_reported_profiles_detail_headline">Report on %1$s</string>
+    <string name="settings_reported_profiles_detail_headline_no_date">Report on %1$s</string>
+    <string name="settings_reported_profiles_detail_date_line">Date: %1$s</string>
+    <string name="settings_reported_profiles_detail_category_line">Report reason: %1$s</string>
+    <string name="settings_reported_profiles_detail_details_line">Report details: %1$s</string>
+    <string name="settings_reported_profiles_detail_see_details">See details</string>
     <string name="settings_reported_profiles_detail_category">Report reason</string>
     <string name="settings_reported_profiles_detail_details">Report Details</string>
     <string name="settings_reported_profiles_detail_status">Status</string>
@@ -459,6 +463,8 @@
     <string name="discover_second_thoughts_banner">Reviewing today\'s passes</string>
     <string name="discover_distance_title">Search radius</string>
     <string name="discover_distance_subtitle">Choose how far to look for new people.</string>
+    <string name="search_distance_km">%1$s km away</string>
+    <string name="matches_distance_km">%1$s km away</string>
     <string name="settings_distance_5km">5 km</string>
     <string name="settings_distance_10km">10 km</string>
     <string name="settings_distance_20km">20 km</string>
@@ -497,10 +503,13 @@ Full access will be automatically restored on %2$s.</string>
 You will no longer be able to access this account. If you believe this was done in error, you can submit an appeal to support.</string>
     <string name="admin_ban_popup_accept">I understand</string>
     <string name="admin_deleted_popup_title">Account Deleted</string>
-    <string name="admin_deleted_popup_message">Your SpectRoom account has been permanently deleted.
+    <string name="admin_deleted_popup_message">Your SpectRoom account has been deleted.
 
 You will no longer be able to access this account. If you believe this was done in error, you can submit an appeal to support.</string>
     <string name="admin_deleted_popup_accept">I understand</string>
+    <string name="admin_restored_popup_title">Account Restored</string>
+    <string name="admin_restored_popup_message">Your SpectRoom account is active again.\n\nYou can sign back in.</string>
+    <string name="admin_restored_popup_accept">Sign in</string>
     <string name="admin_ban_lifted_popup_title">Account ban lifted</string>
     <string name="admin_ban_lifted_popup_message">Your SpectRoom account ban has been lifted.
 
@@ -682,7 +691,7 @@ You can use SpectRoom again.</string>
     <string name="billing_modal_confirm">Confirm</string>
     <string name="billing_change_confirm_message">Are you sure you want to change your plan from %1$s to %2$s?</string>
     <string name="billing_change_success_title">Plan changed</string>
-    <string name="billing_change_success_message">Plan has changed to %1$s successfully.</string>
+    <string name="billing_change_success_message">Your plan has changed successfully to %1$s.</string>
     <string name="billing_modal_downgrade_free">You will move to Free at the end of your current billing period. No further charges will apply.</string>
     <string name="billing_modal_proration">You will be charged %1$s for the %2$s plan. Any unused time on your current plan is prorated automatically.</string>
     <string name="billing_modal_switching_to">Switching to %1$s</string>
@@ -772,4 +781,20 @@ You can use SpectRoom again.</string>
     <string name="profile_plan_pro">Pro Plan</string>
     <string name="profile_plan_premium">Premium Plan</string>
 
+    <string name="messages_copy_menu">Copy</string>
+    <string name="messages_report_menu">Report</string>
+    <string name="messages_delete_menu">Delete</string>
+    <string name="messages_delete_title">Delete message</string>
+    <string name="messages_delete_option_for_me">Delete for me</string>
+    <string name="messages_delete_option_for_everyone">Delete for everyone</string>
+    <string name="messages_delete_confirm">Delete</string>
+    <string name="messages_deleted_placeholder">This message was deleted.</string>
+    <string name="profile_report_confirm_title">Report %1$s?</string>
+    <string name="profile_report_confirm_message">You can report %1$s, or report and block them so they can no longer message you or see your profile.</string>
+    <string name="profile_report_confirm_report_and_block">Report &amp; Block</string>
+    <string name="profile_report_confirm_action">Report</string>
+    <string name="profile_report_notice">Report %1$s</string>
+    <string name="profile_report_submitted_title">Report Submitted</string>
+    <string name="profile_report_submitted_body">Thank you for keeping our community safe. Our team will review this report shortly.</string>
+    <string name="profile_report_submitted_body_blocked">Thank you for keeping our community safe. Our team will review this report shortly. We\'ve also automatically blocked this profile so they can no longer see or contact you.</string>
 </resources>

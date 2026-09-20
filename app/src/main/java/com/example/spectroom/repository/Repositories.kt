@@ -6,6 +6,7 @@ import com.example.spectroom.data.model.ConversationDisplay
 import com.example.spectroom.data.model.ConversationMessagesPage
 import com.example.spectroom.data.model.MatchDisplay
 import com.example.spectroom.data.model.MessageDisplay
+import com.example.spectroom.data.model.MessageSoftDeleteEvent
 import com.example.spectroom.data.model.MessageType
 import com.example.spectroom.data.model.ModerationNotice
 import com.example.spectroom.data.model.PlanTier
@@ -17,6 +18,10 @@ import com.example.spectroom.data.model.SwipeType
 import com.example.spectroom.data.model.UserLocation
 import com.example.spectroom.data.model.UserProfileStatus
 import com.example.spectroom.domain.DiscoverEligibility
+import com.example.spectroom.ui.locale.AppLocale
+import com.example.spectroom.data.local.AppPrefsStore
+import com.example.spectroom.SpectRoomApplication
+import com.example.spectroom.R
 import com.example.spectroom.domain.MatchScoring
 import com.example.spectroom.domain.ProfileCompletion
 import com.google.firebase.Timestamp
@@ -28,6 +33,7 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.QuerySnapshot
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.Source
 import kotlinx.coroutines.channels.awaitClose
@@ -73,7 +79,7 @@ sealed class AccessGate {
     data object Allowed : AccessGate()
     data class Banned(val message: String) : AccessGate()
     data class Frozen(val until: Date, val message: String, val hours: Int = 24) : AccessGate()
-    data class Deleted(val message: String) : AccessGate()
+    data class Deleted(val message: String, val byAdmin: Boolean = false) : AccessGate()
 }
 
 data class UsersPage(
@@ -131,7 +137,15 @@ class AuthRepository(
         val snapshot = db.collection("users").document(uid).get().await()
         if (!snapshot.exists()) return AccessGate.Allowed
         if (snapshot.getBoolean("isDeleted") == true) {
-            return AccessGate.Deleted("This account has been deleted.")
+            val byAdmin = snapshot.isAdminDeletedAccount()
+            return AccessGate.Deleted(
+                message = if (byAdmin) {
+                    "This account has been deleted."
+                } else {
+                    "This email is linked to a recently deleted account. Try again later or contact support."
+                },
+                byAdmin = byAdmin,
+            )
         }
         if (snapshot.getBoolean("isBanned") == true) {
             return AccessGate.Banned("This account has been permanently banned.")
@@ -155,6 +169,19 @@ class AuthRepository(
     }
 
     suspend fun acknowledgeModerationNotice(notice: ModerationNotice) {
+        when (notice) {
+            is ModerationNotice.DeletedAcknowledgement,
+            is ModerationNotice.LoginDeleted,
+            -> {
+                clearPendingAccountDeletedNotice()
+                return
+            }
+            is ModerationNotice.RestoredAcknowledgement -> {
+                clearPendingAccountRestoredNotice()
+                return
+            }
+            else -> Unit
+        }
         val uid = currentUid ?: return
         val updates = when (notice) {
             is ModerationNotice.Warning -> mapOf(
@@ -177,6 +204,60 @@ class AuthRepository(
         }
     }
 
+    /**
+     * Clears the deleted-account notice only.
+     * Never hard-wipes Auth — password + MFA must survive so an admin restore
+     * within 14 days can sign in with the same credentials. Hard wipe is the
+     * scheduled purge after [scheduledHardDeleteAt] only.
+     */
+    suspend fun clearPendingAccountDeletedNotice() {
+        val uid = currentUid ?: return
+        runCatching {
+            db.collection("users").document(uid).update(
+                mapOf(
+                    "pendingAccountDeleted" to com.google.firebase.firestore.FieldValue.delete(),
+                ),
+            ).await()
+        }
+    }
+
+    /** iOS `clearPendingAccountRestoredNotice`. */
+    suspend fun clearPendingAccountRestoredNotice() {
+        val uid = currentUid
+        runCatching {
+            com.google.firebase.functions.FirebaseFunctions
+                .getInstance("us-central1")
+                .getHttpsCallable("acknowledgeAccountRestored")
+                .call(emptyMap<String, Any>())
+                .await()
+        }.onFailure {
+            if (uid != null) {
+                runCatching {
+                    db.collection("users").document(uid).update(
+                        mapOf(
+                            "pendingAccountRestored" to com.google.firebase.firestore.FieldValue.delete(),
+                        ),
+                    ).await()
+                }
+            }
+        }
+    }
+
+    /**
+     * Silently drop a leftover restore notice after a successful sign-in
+     * (iOS `clearPendingAccountRestoredNoticeIfNeeded`).
+     */
+    suspend fun clearPendingAccountRestoredNoticeIfNeeded() {
+        val uid = currentUid ?: return
+        val snapshot = runCatching {
+            db.collection("users").document(uid).get(Source.SERVER).await()
+        }.getOrNull() ?: return
+        @Suppress("UNCHECKED_CAST")
+        val restored = snapshot.get("pendingAccountRestored") as? Map<String, Any?>
+        if (restored == null || restored["acknowledged"] as? Boolean == true) return
+        clearPendingAccountRestoredNotice()
+    }
+
     fun observeModerationNotices(): Flow<ModerationNotice?> = callbackFlow {
         val uid = currentUid
         if (uid == null) {
@@ -186,7 +267,23 @@ class AuthRepository(
         }
         val registration = db.collection("users").document(uid)
             .addSnapshotListener { snapshot, _ ->
-                trySend(snapshot?.toPendingModerationNotice())
+                if (snapshot == null || !snapshot.exists()) return@addSnapshotListener
+                @Suppress("UNCHECKED_CAST")
+                val restored = snapshot.get("pendingAccountRestored") as? Map<String, Any?>
+                if (restored != null && restored["acknowledged"] as? Boolean != true) {
+                    // Signed-in: wipe restore field only — never emit restore popup here.
+                    launch {
+                        runCatching { clearPendingAccountRestoredNoticeIfNeeded() }
+                        trySend(null)
+                    }
+                    return@addSnapshotListener
+                }
+                val notice = snapshot.toPendingModerationNotice()
+                if (notice is ModerationNotice.DeletedAcknowledgement) {
+                    // Persist ack flag so the popup survives Auth revocation.
+                    // ViewModel also marks via AppPrefsStore.
+                }
+                trySend(notice)
             }
         awaitClose { registration.remove() }
     }
@@ -262,7 +359,18 @@ class AuthRepository(
     suspend fun ensureEmailAllowedForAuth(email: String) {
         val info = pendingDeletionInfo(email)
         if (!info.isPending) return
+        // After admin restore on this device, allow the same email/password + MFA even if
+        // deletedEmails is briefly stale (iOS restore handoff parity).
+        if (isRestoredSignInHandoffActive()) return
         error(pendingDeletionMessage(info.deletedByAdmin))
+    }
+
+    /** True while/after the Account Restored popup so sign-in is not blocked as "deleted". */
+    private fun isRestoredSignInHandoffActive(): Boolean {
+        val prefs = runCatching {
+            AppPrefsStore(SpectRoomApplication.instance)
+        }.getOrNull() ?: return false
+        return prefs.hasDismissedRestoredNotice() || prefs.hasPendingRestoredAcknowledgement()
     }
 
     private fun pendingDeletionMessage(deletedByAdmin: Boolean): String =
@@ -625,8 +733,19 @@ fun DocumentSnapshot.toSpectRoomUser(uid: String): SpectRoomUser {
 
 @Suppress("UNCHECKED_CAST")
 fun DocumentSnapshot.toPendingModerationNotice(): ModerationNotice? {
-    if (getBoolean("isDeleted") == true) {
+    // Admin soft-delete: show deleted acknowledgement while session may still exist.
+    if (isAdminDeletedAccount()) {
         return ModerationNotice.DeletedAcknowledgement
+    }
+    // User soft-delete without admin flag — no in-session popup (already signed out).
+    if (getBoolean("isDeleted") == true) {
+        return null
+    }
+    // Restore handoff is shown only while signed out (push / local flag).
+    // Never surface it from a signed-in fetch — that caused a login ↔ restore loop on iOS.
+    val pendingRestored = get("pendingAccountRestored") as? Map<String, Any?>
+    if (pendingRestored != null && pendingRestored["acknowledged"] as? Boolean != true) {
+        return null
     }
     if (getBoolean("isBanned") == true) {
         return ModerationNotice.BanAcknowledgement
@@ -673,6 +792,15 @@ fun DocumentSnapshot.toPendingModerationNotice(): ModerationNotice? {
         return ModerationNotice.FreezeAcknowledgement(activeFreeze, hours)
     }
     return null
+}
+
+/** Mirrors iOS `FirebaseAuthService.isAdminDeletedAccount`. */
+@Suppress("UNCHECKED_CAST")
+fun DocumentSnapshot.isAdminDeletedAccount(): Boolean {
+    if (getBoolean("isDeleted") != true) return false
+    if (getBoolean("deletedByAdmin") == true) return true
+    val pending = get("pendingAccountDeleted") as? Map<String, Any?>
+    return pending != null && pending["acknowledged"] as? Boolean != true
 }
 
 /** Original freeze length (24 / 48 / 72), never remaining time. */
@@ -1022,13 +1150,24 @@ class DiscoverRepository(
         val lon2 = to.longitude
         if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) {
             return if (maxDistanceKm == null) {
-                if (forMatches) "1 km away" else "Nearby"
+                localizedDistanceKm("1", forMatches = forMatches)
             } else {
                 "—"
             }
         }
         val km = DiscoverEligibility.haversineKm(lat1, lon1, lat2, lon2)
-        return DiscoverEligibility.formatDistanceKm(km, forMatches = forMatches)
+        return localizedDistanceKm(
+            DiscoverEligibility.formatDistanceAmount(km),
+            forMatches = forMatches,
+        )
+    }
+
+    private fun localizedDistanceKm(amount: String, forMatches: Boolean): String {
+        val app = SpectRoomApplication.instance
+        val languageCode = AppPrefsStore.readLanguageCode(app)
+        val context = AppLocale.localizedContext(app, languageCode)
+        val resId = if (forMatches) R.string.matches_distance_km else R.string.search_distance_km
+        return context.getString(resId, amount)
     }
 
     private fun effectivePassCount(passDocs: List<Map<String, Any>>): Int {
@@ -1621,7 +1760,125 @@ class MessageRepository(
             voiceDurationSeconds = (data["voiceDuration"] as? Number)?.toDouble(),
             thumbnailURL = data["thumbnailURL"] as? String,
             videoDurationSeconds = (data["videoDuration"] as? Number)?.toDouble(),
+            deletedForViewer = data["deletedForViewer"] as? Boolean ?: false,
+            deletedForEveryone = data["deletedForEveryone"] as? Boolean ?: false,
+            reactions = parseReactions(data["reactions"]),
         )
+    }
+
+    private fun parseReactions(value: Any?): Map<String, String> {
+        val raw = value as? Map<*, *> ?: return emptyMap()
+        val parsed = linkedMapOf<String, String>()
+        for ((key, emojiValue) in raw) {
+            val userId = key as? String ?: continue
+            val emoji = emojiValue as? String ?: continue
+            if (emoji.isNotEmpty()) parsed[userId] = emoji
+        }
+        return parsed
+    }
+
+    enum class MessageDeleteScope {
+        FOR_ME,
+        FOR_EVERYONE,
+    }
+
+    /** Soft-delete a chat message. Documents stay in Firestore for admin audit. */
+    suspend fun softDeleteMessage(
+        messageId: String,
+        partnerId: String,
+        isOutgoing: Boolean,
+        scope: MessageDeleteScope,
+    ) {
+        val uid = auth.currentUser?.uid ?: error("Not signed in")
+        require(messageId.isNotBlank() && !messageId.startsWith("pending")) { "Invalid message id" }
+        val timestamp = Date().time / 1000.0
+        val viewerPatch = mapOf(
+            "deletedForViewer" to true,
+            "deletedAt" to timestamp,
+            "deletedBy" to uid,
+        )
+        val everyonePatch = mapOf(
+            "deletedForEveryone" to true,
+            "deletedForViewer" to true,
+            "deletedAt" to timestamp,
+            "deletedBy" to uid,
+        )
+        val myCollection = if (isOutgoing) "sentMessages" else "incomingMessages"
+        val theirCollection = if (isOutgoing) "incomingMessages" else "sentMessages"
+        val myRef = db.collection("users").document(uid).collection(myCollection).document(messageId)
+        val theirRef = db.collection("users").document(partnerId).collection(theirCollection).document(messageId)
+        when (scope) {
+            MessageDeleteScope.FOR_ME -> myRef.set(viewerPatch, SetOptions.merge()).await()
+            MessageDeleteScope.FOR_EVERYONE -> {
+                myRef.set(everyonePatch, SetOptions.merge()).await()
+                theirRef.set(everyonePatch, SetOptions.merge()).await()
+            }
+        }
+    }
+
+    /** Toggle a quick reaction on both participants' copies of the message. */
+    suspend fun setMessageReaction(
+        messageId: String,
+        partnerId: String,
+        isOutgoing: Boolean,
+        emoji: String,
+        reactions: Map<String, String>,
+    ) {
+        auth.currentUser?.uid ?: error("Not signed in")
+        require(messageId.isNotBlank() && !messageId.startsWith("pending")) { "Invalid message id" }
+        require(emoji in MessageDisplay.QUICK_REACTION_EMOJIS) { "Unsupported reaction" }
+        val patch = mapOf("reactions" to reactions)
+        val myCollection = if (isOutgoing) "sentMessages" else "incomingMessages"
+        val theirCollection = if (isOutgoing) "incomingMessages" else "sentMessages"
+        val uid = auth.currentUser!!.uid
+        val myRef = db.collection("users").document(uid).collection(myCollection).document(messageId)
+        val theirRef = db.collection("users").document(partnerId).collection(theirCollection).document(messageId)
+        myRef.set(patch, SetOptions.merge()).await()
+        theirRef.set(patch, SetOptions.merge()).await()
+    }
+
+    fun observeMessageSoftDeletes(): Flow<MessageSoftDeleteEvent> = callbackFlow {
+        val uid = auth.currentUser?.uid
+        if (uid == null) {
+            close()
+            return@callbackFlow
+        }
+
+        fun handleSnapshot(snapshot: QuerySnapshot?, isOutgoing: Boolean) {
+            if (snapshot == null) return
+            if (snapshot.metadata.isFromCache && !snapshot.metadata.hasPendingWrites()) return
+            for (change in snapshot.documentChanges) {
+                if (change.type != DocumentChange.Type.MODIFIED) continue
+                val data = change.document.data ?: continue
+                val deletedForEveryone = data["deletedForEveryone"] as? Boolean ?: false
+                val deletedForViewer = data["deletedForViewer"] as? Boolean ?: false
+                val hasReactionsField = data.containsKey("reactions")
+                val reactions = if (hasReactionsField) parseReactions(data["reactions"]) else null
+                if (!deletedForEveryone && !deletedForViewer && !hasReactionsField) continue
+                val senderId = data["senderId"] as? String ?: ""
+                val recipientId = data["recipientId"] as? String ?: ""
+                val partnerId = if (isOutgoing) recipientId else senderId
+                if (partnerId.isBlank()) continue
+                trySend(
+                    MessageSoftDeleteEvent(
+                        messageId = change.document.id,
+                        partnerId = partnerId,
+                        deletedForEveryone = deletedForEveryone,
+                        deletedForViewer = deletedForViewer,
+                        reactions = reactions,
+                    ),
+                )
+            }
+        }
+
+        val incoming = db.collection("users").document(uid).collection("incomingMessages")
+            .addSnapshotListener { snapshot, _ -> handleSnapshot(snapshot, isOutgoing = false) }
+        val sent = db.collection("users").document(uid).collection("sentMessages")
+            .addSnapshotListener { snapshot, _ -> handleSnapshot(snapshot, isOutgoing = true) }
+        awaitClose {
+            incoming.remove()
+            sent.remove()
+        }
     }
 
     suspend fun fetchConversationList(currentUser: SpectRoomUser): List<ConversationDisplay> {
@@ -1642,14 +1899,36 @@ class MessageRepository(
             val content: String,
             val createdAt: Double,
             val unread: Boolean,
+            val deleted: Boolean = false,
+            val messageType: String = "text",
+            val voiceDuration: Double? = null,
+            val videoDuration: Double? = null,
         )
 
         val latestByPartner = linkedMapOf<String, Latest>()
-        fun consider(partnerId: String, content: String, createdAt: Double, unread: Boolean) {
+        fun consider(
+            partnerId: String,
+            content: String,
+            createdAt: Double,
+            unread: Boolean,
+            deleted: Boolean,
+            messageType: String,
+            voiceDuration: Double?,
+            videoDuration: Double?,
+        ) {
             if (partnerId.isBlank()) return
             val existing = latestByPartner[partnerId]
             if (existing == null || existing.createdAt < createdAt) {
-                latestByPartner[partnerId] = Latest(partnerId, content, createdAt, unread)
+                latestByPartner[partnerId] = Latest(
+                    partnerId = partnerId,
+                    content = content,
+                    createdAt = createdAt,
+                    unread = unread,
+                    deleted = deleted,
+                    messageType = messageType,
+                    voiceDuration = voiceDuration,
+                    videoDuration = videoDuration,
+                )
             } else if (unread) {
                 latestByPartner[partnerId] = existing.copy(unread = true)
             }
@@ -1659,24 +1938,48 @@ class MessageRepository(
             val data = doc.data ?: continue
             val partnerId = data["recipientId"] as? String ?: continue
             val createdAt = (data["createdAt"] as? Number)?.toDouble() ?: 0.0
-            consider(partnerId, data["content"] as? String ?: "", createdAt, unread = false)
+            val deleted = (data["deletedForViewer"] as? Boolean == true) ||
+                (data["deletedForEveryone"] as? Boolean == true)
+            consider(
+                partnerId = partnerId,
+                content = data["content"] as? String ?: "",
+                createdAt = createdAt,
+                unread = false,
+                deleted = deleted,
+                messageType = data["type"] as? String ?: "text",
+                voiceDuration = (data["voiceDuration"] as? Number)?.toDouble(),
+                videoDuration = (data["videoDuration"] as? Number)?.toDouble(),
+            )
         }
         for (doc in incoming.documents) {
             val data = doc.data ?: continue
             val partnerId = data["senderId"] as? String ?: continue
             val createdAt = (data["createdAt"] as? Number)?.toDouble() ?: 0.0
             val unread = !(data["isRead"] as? Boolean ?: false)
-            consider(partnerId, data["content"] as? String ?: "", createdAt, unread)
+            val deleted = (data["deletedForViewer"] as? Boolean == true) ||
+                (data["deletedForEveryone"] as? Boolean == true)
+            consider(
+                partnerId = partnerId,
+                content = data["content"] as? String ?: "",
+                createdAt = createdAt,
+                unread = unread,
+                deleted = deleted,
+                messageType = data["type"] as? String ?: "text",
+                voiceDuration = (data["voiceDuration"] as? Number)?.toDouble(),
+                videoDuration = (data["videoDuration"] as? Number)?.toDouble(),
+            )
         }
 
         val unreadBySender = fetchUnreadCountsBySender()
         return latestByPartner.values.sortedByDescending { it.createdAt }.map { latest ->
             val messageDate = Date((latest.createdAt * 1000).toLong())
             val preview = when {
-                latest.content.contains("voice_messages") -> "🎙️ Voice message"
-                latest.content.contains("message_videos") -> "🎥 Video"
-                latest.content.startsWith("http") && latest.content.contains("message_images") -> "📷 Photo"
-                latest.content.startsWith("http") && latest.content.contains("firebasestorage") -> "📷 Photo"
+                latest.deleted -> ""
+                latest.messageType == "voice" || latest.content.contains("voice_messages") -> "🎙️ Voice message"
+                latest.messageType == "video" || latest.content.contains("message_videos") -> "🎥 Video"
+                latest.messageType == "image" ||
+                    (latest.content.startsWith("http") && latest.content.contains("message_images")) ||
+                    (latest.content.startsWith("http") && latest.content.contains("firebasestorage")) -> "📷 Photo"
                 else -> latest.content.ifBlank { "No messages yet" }
             }
             if (AdminSender.isAdmin(latest.partnerId)) {
@@ -1690,6 +1993,7 @@ class MessageRepository(
                     timestamp = "",
                     isOnline = false,
                     unreadCount = unreadBySender[latest.partnerId] ?: 0,
+                    lastMessageDeleted = latest.deleted,
                 )
             } else {
                 val other = db.collection("users").document(latest.partnerId).get().await()
@@ -1703,6 +2007,7 @@ class MessageRepository(
                     timestamp = "",
                     isOnline = other.getBoolean("isOnline") ?: false,
                     unreadCount = unreadBySender[latest.partnerId] ?: 0,
+                    lastMessageDeleted = latest.deleted,
                 )
             }
         }

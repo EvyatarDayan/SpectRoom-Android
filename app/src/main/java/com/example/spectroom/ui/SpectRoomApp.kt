@@ -196,26 +196,37 @@ fun SpectRoomApp(
         }
     }
 
-    LaunchedEffect(pendingNotificationDeepLink, uiState.destination) {
+    LaunchedEffect(pendingNotificationDeepLink, uiState.destination, uiState.hasResolvedAuthState) {
         val link = pendingNotificationDeepLink ?: return@LaunchedEffect
-        if (uiState.destination != AppDestination.MAIN) return@LaunchedEffect
         when (link) {
-            is NotificationDeepLink.Chat -> {
-                viewModel.suppressIncomingMessageSoundBriefly()
-                viewModel.openChat(
-                    partnerId = link.userId,
-                    partnerName = link.userName.ifBlank { "Match" },
-                    partnerPhoto = link.userPhoto,
-                )
+            is NotificationDeepLink.AccountRestored -> {
+                viewModel.presentAccountRestoredNotice()
+                onNotificationDeepLinkConsumed()
             }
-            is NotificationDeepLink.Match -> viewModel.openMatchFromNotification(
-                userId = link.userId,
-                userName = link.userName.ifBlank { "Match" },
-                userPhoto = link.userPhoto,
-                matchId = link.matchId,
-            )
+            is NotificationDeepLink.Chat,
+            is NotificationDeepLink.Match,
+            -> {
+                if (uiState.destination != AppDestination.MAIN) return@LaunchedEffect
+                when (link) {
+                    is NotificationDeepLink.Chat -> {
+                        viewModel.suppressIncomingMessageSoundBriefly()
+                        viewModel.openChat(
+                            partnerId = link.userId,
+                            partnerName = link.userName.ifBlank { "Match" },
+                            partnerPhoto = link.userPhoto,
+                        )
+                    }
+                    is NotificationDeepLink.Match -> viewModel.openMatchFromNotification(
+                        userId = link.userId,
+                        userName = link.userName.ifBlank { "Match" },
+                        userPhoto = link.userPhoto,
+                        matchId = link.matchId,
+                    )
+                    else -> Unit
+                }
+                onNotificationDeepLinkConsumed()
+            }
         }
-        onNotificationDeepLinkConsumed()
     }
 
     ProvideAppLocale(languageCode = uiState.languageCode) {
@@ -253,10 +264,14 @@ fun SpectRoomApp(
                             isLoading = uiState.isAuthLoading,
                             errorMessage = uiState.authError,
                             noticeMessage = uiState.authNotice,
+                            initialEmail = uiState.authEmailDraft,
+                            initialPassword = uiState.authPasswordDraft,
                             onSignIn = viewModel::signIn,
                             onSignUp = viewModel::signUp,
                             onForgotPassword = viewModel::resetPassword,
                             onClearError = viewModel::clearAuthError,
+                            onEmailChange = viewModel::updateAuthEmailDraft,
+                            onPasswordChange = viewModel::updateAuthPasswordDraft,
                         )
                     }
                 }
@@ -338,6 +353,7 @@ fun SpectRoomApp(
                             onProgrammaticSwipe = viewModel::requestProgrammaticSwipe,
                             onProgrammaticSwipeComplete = viewModel::onProgrammaticSwipeComplete,
                             onUndo = viewModel::undoLastSwipe,
+                            onUndoEntranceConsumed = viewModel::clearUndoEntrance,
                             onOpenProfile = viewModel::openProfileDetail,
                             onUpdateEnergyLevel = viewModel::updateEnergyLevel,
                             onSetDistance = viewModel::setDistanceOption,
@@ -456,7 +472,7 @@ fun SpectRoomApp(
                                         )
                                     }
                                 },
-                                onBlock = viewModel::blockChatPartner,
+                                onBlock = viewModel::blockActiveChatPartnerQuietly,
                                 onReport = {
                                     val id = uiState.activeChatPartnerId ?: return@ChatScreen
                                     viewModel.showReport(
@@ -485,6 +501,11 @@ fun SpectRoomApp(
                                         ),
                                     )
                                 },
+                                onReactMessage = viewModel::reactToChatMessage,
+                                onSoftDeleteMessage = viewModel::softDeleteChatMessage,
+                                onSubmitChatReport = { reason, details, alsoBlock ->
+                                    viewModel.submitReportFromChat(reason, details, alsoBlock)
+                                },
                             )
                         } else {
                             MessagesScreen(
@@ -492,7 +513,9 @@ fun SpectRoomApp(
                                 isLoading = socialState.isLoadingMessages,
                                 hasMatches = viewModel.visibleMatches().isNotEmpty(),
                                 historyMatchIds = socialState.messageHistoryMatchIds,
-                                isUserBlocked = viewModel::isUserBlocked,
+                                blockedUserIds = socialState.blockedUsers.map { it.id }.toSet() +
+                                    (uiState.currentUser?.blockedUsers?.map { it.id }?.toSet()
+                                        ?: emptySet()),
                                 blockedAtForUser = { userId -> viewModel.blockedUser(userId)?.blockedAt },
                                 onSearchQueryChange = viewModel::searchMessageHistory,
                                 onOpenConversation = { conversation ->

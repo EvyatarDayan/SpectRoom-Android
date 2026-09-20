@@ -28,7 +28,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -37,9 +36,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -77,17 +76,21 @@ fun AuthenticationScreen(
     isLoading: Boolean,
     errorMessage: String?,
     noticeMessage: String? = null,
+    initialEmail: String = "",
+    initialPassword: String = "",
     onSignIn: (email: String, password: String) -> Unit,
     onSignUp: (name: String, email: String, password: String, phoneE164: String) -> Unit,
     onForgotPassword: (email: String) -> Unit,
     onClearError: () -> Unit,
+    onEmailChange: (String) -> Unit = {},
+    onPasswordChange: (String) -> Unit = {},
 ) {
     val colors = LocalSpectRoomColors.current
     val focusManager = LocalFocusManager.current
     var isLoginMode by remember { mutableStateOf(true) }
     var name by remember { mutableStateOf("") }
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf(initialEmail) }
+    var password by remember { mutableStateOf(initialPassword) }
     var confirmPassword by remember { mutableStateOf("") }
     var phoneCountry by remember { mutableStateOf(PhoneCountry.Sweden) }
     var phoneNumber by remember { mutableStateOf("") }
@@ -95,6 +98,17 @@ fun AuthenticationScreen(
     var confirmPasswordVisible by remember { mutableStateOf(false) }
     var showCountryPicker by remember { mutableStateOf(false) }
     var localPopupMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(initialEmail) {
+        if (initialEmail.isNotBlank() && email.isBlank()) {
+            email = initialEmail
+        }
+    }
+    LaunchedEffect(initialPassword) {
+        if (initialPassword.isNotBlank() && password.isBlank()) {
+            password = initialPassword
+        }
+    }
 
     val popupMessage = localPopupMessage ?: errorMessage ?: noticeMessage
     val errorName = stringResource(R.string.auth_error_name)
@@ -148,32 +162,33 @@ fun AuthenticationScreen(
         onSignUp(trimmedName, trimmedEmail, password, e164)
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(colors.background)
-            .imePadding(),
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 24.dp, bottom = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .fillMaxSize()
+                .background(colors.background)
+                .imePadding(),
         ) {
-            Text(
-                text = stringResource(R.string.app_name),
-                fontSize = 34.sp,
-                fontWeight = FontWeight.Bold,
-                color = colors.text,
-            )
-            Spacer(modifier = Modifier.height(28.dp))
-            AuthModeSegmentedControl(
-                isLoginMode = isLoginMode,
-                onSelectLogin = { switchMode(true) },
-                onSelectSignUp = { switchMode(false) },
-                modifier = Modifier.padding(horizontal = 16.dp),
-            )
-        }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 24.dp, bottom = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = stringResource(R.string.app_name),
+                    fontSize = 34.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.text,
+                )
+                Spacer(modifier = Modifier.height(28.dp))
+                AuthModeSegmentedControl(
+                    isLoginMode = isLoginMode,
+                    onSelectLogin = { switchMode(true) },
+                    onSelectSignUp = { switchMode(false) },
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
 
         Column(
             modifier = Modifier
@@ -201,11 +216,15 @@ fun AuthenticationScreen(
                 }
             }
 
-            AuthLabeledField(label = stringResource(R.string.auth_email)) {
-                AuthTextField(
-                    value = email,
-                    onValueChange = { email = it; clearErrors() },
-                    placeholder = stringResource(R.string.auth_email_placeholder),
+                    AuthLabeledField(label = stringResource(R.string.auth_email)) {
+                        AuthTextField(
+                            value = email,
+                            onValueChange = {
+                                email = it
+                                onEmailChange(it)
+                                clearErrors()
+                            },
+                            placeholder = stringResource(R.string.auth_email_placeholder),
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Email,
                         imeAction = ImeAction.Next,
@@ -239,7 +258,11 @@ fun AuthenticationScreen(
             AuthLabeledField(label = stringResource(R.string.auth_password)) {
                 AuthPasswordField(
                     value = password,
-                    onValueChange = { password = it; clearErrors() },
+                    onValueChange = {
+                        password = it
+                        onPasswordChange(it)
+                        clearErrors()
+                    },
                     placeholder = stringResource(R.string.auth_password_placeholder),
                     visible = passwordVisible,
                     onToggleVisible = { passwordVisible = !passwordVisible },
@@ -346,30 +369,14 @@ fun AuthenticationScreen(
                 }
             }
         }
-    }
+        }
 
-    if (!popupMessage.isNullOrBlank()) {
-        AlertDialog(
-            onDismissRequest = { clearErrors() },
-            title = {
-                Text(
-                    text = popupMessage.orEmpty(),
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
-                    fontSize = 17.sp,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { clearErrors() }) {
-                    Text(
-                        text = stringResource(R.string.auth_ok),
-                        color = TabSelected,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-            },
-        )
+        if (!popupMessage.isNullOrBlank()) {
+            AuthMessageOverlay(
+                message = popupMessage.orEmpty(),
+                onDismiss = { clearErrors() },
+            )
+        }
     }
 
     if (showCountryPicker) {

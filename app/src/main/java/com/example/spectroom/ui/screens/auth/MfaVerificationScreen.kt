@@ -30,7 +30,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -38,7 +37,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -126,8 +124,8 @@ fun MfaVerificationScreen(
     val e164 = PhoneCountry.buildE164(country, nationalNumber)
     val phoneFallback = stringResource(R.string.mfa_phone_fallback)
     val displayedPhone = when {
-        isEnroll && resolvedPhoneE164.isNotBlank() -> resolvedPhoneE164
         maskedPhone.isNotBlank() -> maskedPhone
+        resolvedPhoneE164.isNotBlank() -> resolvedPhoneE164
         else -> phoneFallback
     }
 
@@ -255,27 +253,28 @@ fun MfaVerificationScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(colors.background),
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(top = 40.dp, bottom = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .fillMaxSize()
+                .background(colors.background),
         ) {
-            Text(
-                text = headerTitle,
-                fontWeight = FontWeight.Bold,
-                fontSize = 32.sp,
-                color = colors.text,
-                textAlign = TextAlign.Center,
-            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp)
+                    .padding(top = 40.dp, bottom = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = headerTitle,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 32.sp,
+                    color = colors.text,
+                    textAlign = TextAlign.Center,
+                )
             if (showsLockIcon) {
                 Spacer(modifier = Modifier.height(14.dp))
                 Image(
@@ -601,46 +600,15 @@ fun MfaVerificationScreen(
                 )
             }
         }
-    }
+        }
 
-    if (!errorMessage.isNullOrBlank()) {
-        AlertDialog(
-            onDismissRequest = onClearError,
-            title = if (!popupTitle.isNullOrBlank()) {
-                {
-                    Text(
-                        text = popupTitle,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            } else {
-                {
-                    Text(
-                        text = errorMessage,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth(),
-                        fontSize = 17.sp,
-                    )
-                }
-            },
-            text = if (!popupTitle.isNullOrBlank()) {
-                { Text(errorMessage, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }
-            } else {
-                null
-            },
-            confirmButton = {
-                TextButton(onClick = onClearError) {
-                    Text(
-                        text = stringResource(R.string.auth_ok),
-                        color = TabSelected,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-            },
-        )
+        if (!errorMessage.isNullOrBlank()) {
+            AuthMessageOverlay(
+                message = errorMessage,
+                title = popupTitle?.takeIf { it.isNotBlank() },
+                onDismiss = onClearError,
+            )
+        }
     }
 
     if (showCountryPicker) {

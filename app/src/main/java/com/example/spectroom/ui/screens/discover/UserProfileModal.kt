@@ -56,6 +56,8 @@ import com.example.spectroom.data.model.PlanTier
 import com.example.spectroom.data.model.ProfileCard
 import com.example.spectroom.data.model.ProfileReportReason
 import com.example.spectroom.data.model.SensoryPreferenceOption
+import com.example.spectroom.domain.DiscoverEligibility
+import com.example.spectroom.ui.components.BlockedProfileLabel
 import com.example.spectroom.ui.screens.profile.ProfileBlueField
 import com.example.spectroom.ui.screens.profile.ProfileBlueFieldText
 import com.example.spectroom.ui.screens.profile.ProfileEditSectionCard
@@ -73,6 +75,18 @@ import com.example.spectroom.ui.theme.LikeGreen
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
 import com.example.spectroom.ui.theme.PassRed
 import com.example.spectroom.ui.theme.TabSelected
+import com.example.spectroom.viewmodel.DiscoverUiState
+import java.util.Locale
+
+@Composable
+private fun discoverModalDistanceLabel(raw: String): String {
+    val context = LocalContext.current
+    return remember(raw) {
+        DiscoverEligibility.upgradeDistanceLabel(raw) { amount ->
+            context.getString(R.string.search_distance_km, amount)
+        }
+    }
+}
 
 @Composable
 fun UserProfileModal(
@@ -219,7 +233,7 @@ fun UserProfileModal(
                         ProfileFieldHeading(stringResource(R.string.profile_location))
                         Spacer(modifier = Modifier.height(12.dp))
                         ProfileBlueFieldText(
-                            text = profile.distance.ifBlank {
+                            text = discoverModalDistanceLabel(profile.distance).ifBlank {
                                 stringResource(R.string.profile_location_not_specified)
                             },
                             secondary = profile.distance.isBlank(),
@@ -286,7 +300,10 @@ fun UserProfileModal(
                 )
             }
             if (showReportThankYou) {
-                ReportThankYouOverlay(onDismiss = onDismissReportThankYou)
+                ReportThankYouOverlay(
+                    didBlock = true,
+                    onDismiss = onDismissReportThankYou,
+                )
             }
         }
     }

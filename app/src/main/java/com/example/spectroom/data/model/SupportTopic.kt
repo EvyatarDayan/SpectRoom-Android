@@ -42,6 +42,7 @@ enum class SupportTopic(
             is ModerationNotice.DeletedAcknowledgement,
             is ModerationNotice.LoginDeleted,
             -> ACCOUNT_DELETED
+            is ModerationNotice.RestoredAcknowledgement -> OTHER
             else -> ACCOUNT_FREEZE
         }
     }

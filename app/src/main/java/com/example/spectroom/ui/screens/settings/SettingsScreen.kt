@@ -43,6 +43,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -65,6 +67,7 @@ import com.example.spectroom.R
 import com.example.spectroom.data.model.AppLanguage
 import com.example.spectroom.data.model.PlanTier
 import com.example.spectroom.ui.components.TabBarBodyHeight
+import com.example.spectroom.ui.theme.LikeGreen
 import com.example.spectroom.ui.theme.LocalSpectRoomColors
 import com.example.spectroom.ui.theme.TabSelected
 
@@ -79,8 +82,6 @@ private val SettingsTitleBarReserve =
 private val SectionTitleBottomPadding = 8.dp
 private val RowVerticalPadding = 14.dp
 private val IconSize = 24.dp
-private val SignOutConfirmCardCorner = 16.dp
-private val SignOutConfirmButtonCorner = 12.dp
 /** Mirror iOS danger-zone coral `Color(red: 1.0, green: 0.45, blue: 0.45)`. */
 private val DangerZoneCoral = Color(red = 1f, green = 0.45f, blue = 0.45f)
 
@@ -491,7 +492,7 @@ private fun SettingsNavigationRow(
     }
 }
 
-/** Mirror iOS `SignOutConfirmationOverlay` — title + Cancel / Yes side by side. */
+/** Matches unblock / auth confirm chrome — title + Cancel | Yes. */
 @Composable
 private fun SignOutConfirmationOverlay(
     onCancel: () -> Unit,
@@ -501,7 +502,7 @@ private fun SignOutConfirmationOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.45f))
+            .background(Color.Black.copy(alpha = 0.35f))
             .zIndex(40f)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -514,7 +515,7 @@ private fun SignOutConfirmationOverlay(
             modifier = Modifier
                 .padding(horizontal = 36.dp)
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(SignOutConfirmCardCorner))
+                .clip(RoundedCornerShape(16.dp))
                 .background(colors.card)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
@@ -532,56 +533,35 @@ private fun SignOutConfirmationOverlay(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp)
-                    .padding(top = 22.dp),
+                    .padding(top = 20.dp, bottom = 18.dp),
             )
-            Spacer(modifier = Modifier.height(16.dp))
+            HorizontalDivider(color = colors.border)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-                    .padding(bottom = 20.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    .height(48.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(SignOutConfirmButtonCorner))
-                        .background(colors.background)
-                        .border(1.dp, colors.border, RoundedCornerShape(SignOutConfirmButtonCorner))
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = onCancel,
-                        )
-                        .padding(vertical = 14.dp),
-                    contentAlignment = Alignment.Center,
+                TextButton(
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f),
                 ) {
                     Text(
                         text = stringResource(R.string.common_cancel),
                         color = colors.text,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 15.sp,
+                        fontSize = 16.sp,
                     )
                 }
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(SignOutConfirmButtonCorner))
-                        .background(TabSelected.copy(alpha = 0.1f))
-                        .border(1.dp, TabSelected.copy(alpha = 0.35f), RoundedCornerShape(SignOutConfirmButtonCorner))
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = onConfirm,
-                        )
-                        .padding(vertical = 14.dp),
-                    contentAlignment = Alignment.Center,
+                VerticalDivider(modifier = Modifier.height(44.dp), color = colors.border)
+                TextButton(
+                    onClick = onConfirm,
+                    modifier = Modifier.weight(1f),
                 ) {
                     Text(
                         text = stringResource(R.string.settings_sign_out_confirm_yes),
-                        color = TabSelected,
+                        color = LikeGreen,
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 15.sp,
+                        fontSize = 16.sp,
                     )
                 }
             }

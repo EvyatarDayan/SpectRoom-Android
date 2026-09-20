@@ -1,9 +1,11 @@
 package com.example.spectroom.data.remote
 
 import android.app.Activity
+import com.example.spectroom.repository.AccessGate
 import com.example.spectroom.repository.AuthRepository
 import com.google.firebase.FirebaseException
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.FirebaseAuthMultiFactorException
 import com.google.firebase.auth.MultiFactorResolver
 import com.google.firebase.auth.PhoneAuthCredential
@@ -41,15 +43,12 @@ class MfaAuthRepository(
     val isMfaEnrolled: Boolean
         get() = auth.currentUser?.multiFactor?.enrolledFactors?.isNotEmpty() == true
 
-    /** True when SMS MFA is enrolled in Auth, or Firestore marks a seeded/test account as ready. */
-    suspend fun isMfaEnrolledOrBypassed(): Boolean {
-        if (isMfaEnrolled) return true
-        val uid = auth.currentUser?.uid ?: return false
-        val snapshot = runCatching {
-            db.collection("users").document(uid).get().await()
-        }.getOrNull() ?: return false
-        return snapshot.getBoolean("mfaEnrolled") == true
-    }
+    /**
+     * True when SMS MFA is enrolled in Firebase Auth.
+     * Do not trust Firestore `mfaEnrolled` alone — after Auth wipe/restore the flag can
+     * stay true with zero Auth factors, which would skip sign-in MFA and enrollment.
+     */
+    suspend fun isMfaEnrolledOrBypassed(): Boolean = isMfaEnrolled
 
     /** True while email/password succeeded but SMS MFA sign-in is still pending. */
     val hasPendingSignIn: Boolean
@@ -57,21 +56,78 @@ class MfaAuthRepository(
 
     suspend fun signInWithPossibleMfa(email: String, password: String): MfaSignInResult {
         val normalized = email.trim().lowercase()
-        authRepository.ensureEmailAllowedForAuth(normalized)
+        // Do NOT call checkEmailPendingDeletion before Auth.
+        // After admin restore, deletedEmails can stay stale and would show "Invalid credentials"
+        // instead of the MFA code screen. Password validity is decided by Firebase Auth;
+        // still-deleted accounts are blocked after Auth succeeds via evaluateAccessGate.
         return try {
             auth.signInWithEmailAndPassword(normalized, password).await()
+            enforceAccessAfterPasswordSignIn()
             MfaSignInResult.Completed
         } catch (e: FirebaseAuthMultiFactorException) {
-            // Password was correct but MFA is required — re-check deletion before SMS.
-            authRepository.ensureEmailAllowedForAuth(normalized)
-            val resolver = e.resolver
-            pendingResolver = resolver
-            val hint = resolver.hints.filterIsInstance<PhoneMultiFactorInfo>().firstOrNull()
-            val masked = hint?.displayName?.takeIf { it.isNotBlank() }
-                ?: hint?.phoneNumber?.let { maskPhone(it) }
-                ?: "your phone"
-            MfaSignInResult.MfaRequired(maskedPhone = masked)
+            // Password is correct — always open the Security Code screen (iOS parity for restore).
+            beginMfaChallenge(e.resolver)
+        } catch (e: Exception) {
+            val mfa = unwrapMultiFactorException(e)
+            if (mfa != null) {
+                beginMfaChallenge(mfa.resolver)
+            } else {
+                throw unwrapAuthException(e)
+            }
         }
+    }
+
+    /**
+     * Non-MFA password success: reject soft/admin-deleted accounts before entering the app.
+     */
+    private suspend fun enforceAccessAfterPasswordSignIn() {
+        when (val gate = authRepository.evaluateAccessGate()) {
+            is AccessGate.Deleted -> {
+                runCatching { auth.signOut() }
+                error(
+                    if (gate.byAdmin) {
+                        "This account has been deleted."
+                    } else {
+                        "This email is linked to a recently deleted account. Try again later or contact support."
+                    },
+                )
+            }
+            is AccessGate.Banned -> {
+                runCatching { auth.signOut() }
+                error(gate.message)
+            }
+            is AccessGate.Frozen -> {
+                runCatching { auth.signOut() }
+                error(gate.message)
+            }
+            AccessGate.Allowed -> Unit
+        }
+    }
+
+    private fun beginMfaChallenge(resolver: MultiFactorResolver): MfaSignInResult {
+        pendingResolver = resolver
+        val hint = resolver.hints.filterIsInstance<PhoneMultiFactorInfo>().firstOrNull()
+        val masked = displayPhoneForHint(hint)
+        return MfaSignInResult.MfaRequired(maskedPhone = masked)
+    }
+
+    private fun unwrapMultiFactorException(error: Throwable): FirebaseAuthMultiFactorException? {
+        if (error is FirebaseAuthMultiFactorException) return error
+        var current: Throwable? = error
+        while (current != null) {
+            if (current is FirebaseAuthMultiFactorException) return current
+            current = current.cause
+        }
+        return null
+    }
+
+    private fun unwrapAuthException(error: Throwable): Throwable {
+        var current: Throwable? = error
+        while (current != null) {
+            if (current is FirebaseAuthException) return current
+            current = current.cause
+        }
+        return error
     }
 
     suspend fun sendSignInMfaCode(activity: Activity) {
@@ -188,9 +244,23 @@ class MfaAuthRepository(
         pendingEnrollPhoneE164 = null
     }
 
-    private fun maskPhone(phone: String): String {
-        if (phone.length < 4) return phone
-        return "${phone.take(3)}••••${phone.takeLast(2)}"
+    /**
+     * Prefer the real phone number over MFA display names like "Phone"
+     * (iOS `FirebaseAuthService+MFA.maskedPhone(for:)` preference order).
+     * SpectRoom shows the full number on the security-code screen (not masked).
+     */
+    private fun displayPhoneForHint(hint: PhoneMultiFactorInfo?): String {
+        val phone = hint?.phoneNumber?.trim().orEmpty()
+        if (phone.isNotEmpty()) return phone
+        val name = hint?.displayName?.trim().orEmpty()
+        if (name.isNotEmpty() && name.lowercase() !in GENERIC_MFA_DISPLAY_NAMES) {
+            return name
+        }
+        return ""
+    }
+
+    companion object {
+        private val GENERIC_MFA_DISPLAY_NAMES = setOf("phone", "sms", "mobile", "mfa")
     }
 
     private suspend fun verifyPhoneForSignIn(

@@ -55,6 +55,8 @@ sealed class NotificationDeepLink {
         val userPhoto: String?,
         val matchId: String?,
     ) : NotificationDeepLink()
+
+    data object AccountRestored : NotificationDeepLink()
 }
 
 /** @deprecated Prefer [NotificationDeepLink]; kept for call-site clarity during migration. */
@@ -70,6 +72,9 @@ fun Intent?.toNotificationDeepLink(): NotificationDeepLink? {
             else -> LocalNotificationHelper.TYPE_MESSAGE
         }
     return when (type) {
+        LocalNotificationHelper.TYPE_ACCOUNT_RESTORED,
+        "moderation_account_restored",
+        -> NotificationDeepLink.AccountRestored
         LocalNotificationHelper.TYPE_MATCH -> {
             val id = getStringExtra(SpectRoomMessagingService.EXTRA_OPEN_MATCH_USER_ID)
                 ?.takeIf { it.isNotBlank() }

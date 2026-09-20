@@ -7,8 +7,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -30,6 +32,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -311,6 +314,40 @@ fun AccountBillingSheet(
                     )
                 }
             }
+
+            state.pendingPlanChange?.let { pending ->
+                PlanChangeConfirmOverlay(
+                    title = pending.title,
+                    message = pending.message,
+                    onCancel = { state.dismissPlanChangeDialog() },
+                    onConfirm = {
+                        if (state.isBusy) return@PlanChangeConfirmOverlay
+                        val successLabel = planChangeTargetLabelForInterval(
+                            context,
+                            pending.plan,
+                            pending.interval,
+                        )
+                        state.isBusy = true
+                        state.pendingPlanChange = null
+                        scope.launch {
+                            state.performPlanChange(
+                                plan = pending.plan,
+                                interval = pending.interval,
+                                successLabel = successLabel,
+                                errorMessage = ::errorMessage,
+                                onPlanChanged = onPlanChanged,
+                            )
+                        }
+                    },
+                )
+            }
+
+            state.planChangeSuccessLabel?.let { label ->
+                PlanChangeSuccessOverlay(
+                    planLabel = label,
+                    onDismiss = { state.planChangeSuccessLabel = null },
+                )
+            }
         }
     }
 
@@ -359,62 +396,6 @@ fun AccountBillingSheet(
             },
             confirmButton = {
                 TextButton(onClick = { state.cancelSuccessPlanLabel = null }) {
-                    Text(stringResource(R.string.common_ok))
-                }
-            },
-        )
-    }
-
-    state.pendingPlanChange?.let { pending ->
-        AlertDialog(
-            onDismissRequest = {
-                if (!state.isBusy) state.pendingPlanChange = null
-            },
-            title = { Text(pending.title) },
-            text = { Text(pending.message) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        if (state.isBusy) return@TextButton
-                        // Dismiss confirm immediately, then run change + success alert (iOS).
-                        val successLabel = planChangeTargetLabelForInterval(
-                            context,
-                            pending.plan,
-                            pending.interval,
-                        )
-                        state.isBusy = true
-                        state.pendingPlanChange = null
-                        scope.launch {
-                            state.performPlanChange(
-                                plan = pending.plan,
-                                interval = pending.interval,
-                                successLabel = successLabel,
-                                errorMessage = ::errorMessage,
-                                onPlanChanged = onPlanChanged,
-                            )
-                        }
-                    },
-                ) {
-                    Text(stringResource(R.string.billing_modal_confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { state.dismissPlanChangeDialog() }) {
-                    Text(stringResource(R.string.common_cancel))
-                }
-            },
-        )
-    }
-
-    state.planChangeSuccessLabel?.let { label ->
-        AlertDialog(
-            onDismissRequest = { state.planChangeSuccessLabel = null },
-            title = { Text(stringResource(R.string.billing_change_success_title)) },
-            text = {
-                Text(stringResource(R.string.billing_change_success_message, label))
-            },
-            confirmButton = {
-                TextButton(onClick = { state.planChangeSuccessLabel = null }) {
                     Text(stringResource(R.string.common_ok))
                 }
             },
@@ -645,6 +626,7 @@ private fun BillingIntervalSection(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .height(IntrinsicSize.Max)
                 .clip(RoundedCornerShape(12.dp))
                 .border(1.dp, colors.border, RoundedCornerShape(12.dp))
                 .padding(4.dp),
@@ -655,6 +637,7 @@ private fun BillingIntervalSection(
                 Row(
                     modifier = Modifier
                         .weight(1f)
+                        .fillMaxHeight()
                         .clip(RoundedCornerShape(10.dp))
                         .background(if (selected) TabSelected else colors.background)
                         .clickable { onIntervalChange(interval) }
@@ -1106,5 +1089,151 @@ private fun BillingErrorState(message: String, onRetry: () -> Unit) {
                 .clickable(onClick = onRetry)
                 .padding(horizontal = 20.dp, vertical = 10.dp),
         )
+    }
+}
+
+/** Matches iOS `PlanChangeConfirmOverlay`. */
+@Composable
+private fun PlanChangeConfirmOverlay(
+    title: String,
+    message: String,
+    onCancel: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val colors = LocalSpectRoomColors.current
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.35f))
+            .clickable(onClick = onCancel),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 36.dp)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(colors.card)
+                .clickable(enabled = false) {},
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(top = 20.dp, bottom = 18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = title,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 17.sp,
+                    color = colors.text,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+                Text(
+                    text = message,
+                    fontSize = 15.sp,
+                    lineHeight = 20.sp,
+                    color = colors.secondaryText,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            HorizontalDivider(color = colors.border)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        text = stringResource(R.string.common_cancel),
+                        color = colors.text,
+                        fontSize = 16.sp,
+                    )
+                }
+                VerticalDivider(modifier = Modifier.height(44.dp), color = colors.border)
+                TextButton(
+                    onClick = onConfirm,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        text = stringResource(R.string.billing_modal_confirm),
+                        color = BillingGreen,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 16.sp,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Matches iOS `PlanChangeSuccessOverlay`. */
+@Composable
+private fun PlanChangeSuccessOverlay(
+    planLabel: String,
+    onDismiss: () -> Unit,
+) {
+    val colors = LocalSpectRoomColors.current
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.35f))
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 36.dp)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(colors.card)
+                .clickable(enabled = false) {},
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(top = 20.dp, bottom = 18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.CheckCircle,
+                    contentDescription = null,
+                    tint = BillingGreen,
+                    modifier = Modifier.size(36.dp),
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = stringResource(R.string.billing_change_success_message, planLabel),
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 17.sp,
+                    color = colors.text,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            HorizontalDivider(color = colors.border)
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.common_ok),
+                    color = BillingGreen,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp,
+                )
+            }
+        }
     }
 }

@@ -39,13 +39,18 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.spectroom.data.remote.VoiceCacheService
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import java.io.File
 import java.util.concurrent.atomic.AtomicReference
 
@@ -79,6 +84,8 @@ fun VoiceMessagePlayer(
     timestampText: String? = null,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val textColor = if (isOutgoing) Color.Black.copy(alpha = 0.75f) else Color.Black.copy(alpha = 0.65f)
     val baseColor = if (isOutgoing) OutgoingBubble else Color.White
     var isLoading by remember(audioUrl, localFile) { mutableStateOf(false) }
@@ -90,6 +97,7 @@ fun VoiceMessagePlayer(
     }
     var showElapsed by remember(audioUrl, localFile) { mutableStateOf(false) }
     var player by remember(audioUrl, localFile) { mutableStateOf<MediaPlayer?>(null) }
+    var resolveJob by remember(audioUrl, localFile) { mutableStateOf<Job?>(null) }
 
     fun seekTo(progress: Float) {
         val p = player ?: return
@@ -124,47 +132,58 @@ fun VoiceMessagePlayer(
             }
             return
         }
-        val source = localFile?.absolutePath ?: audioUrl
-        if (source.isNullOrBlank()) {
-            loadError = true
-            return
-        }
         isLoading = true
         loadError = false
-        val mediaPlayer = MediaPlayer()
-        player = mediaPlayer
-        runCatching {
-            mediaPlayer.setDataSource(source)
-            mediaPlayer.setOnPreparedListener { prepared ->
-                isLoading = false
-                val secs = prepared.duration / 1000f
-                if (secs > 0f) duration = secs
-                if (autoPlay) {
-                    claimPlayer(prepared)
-                    prepared.start()
-                    isPlaying = true
-                    showElapsed = true
+        resolveJob?.cancel()
+        resolveJob = scope.launch {
+            val sourcePath = runCatching {
+                when {
+                    localFile != null -> localFile.absolutePath
+                    audioUrl.isNullOrBlank() -> null
+                    audioUrl.startsWith("file:") || audioUrl.startsWith("/") -> audioUrl
+                    else -> VoiceCacheService.getInstance(context).localFile(audioUrl).absolutePath
                 }
-            }
-            mediaPlayer.setOnCompletionListener {
-                isPlaying = false
-                currentTime = 0f
-                showElapsed = false
-                runCatching { it.seekTo(0) }
-                releaseClaim(it)
-            }
-            mediaPlayer.setOnErrorListener { _, _, _ ->
+            }.getOrNull()
+            if (sourcePath.isNullOrBlank()) {
                 isLoading = false
                 loadError = true
-                isPlaying = false
-                true
+                return@launch
             }
-            mediaPlayer.prepareAsync()
-        }.onFailure {
-            isLoading = false
-            loadError = true
-            mediaPlayer.release()
-            player = null
+            val mediaPlayer = MediaPlayer()
+            player = mediaPlayer
+            runCatching {
+                mediaPlayer.setDataSource(sourcePath)
+                mediaPlayer.setOnPreparedListener { prepared ->
+                    isLoading = false
+                    val secs = prepared.duration / 1000f
+                    if (secs > 0f) duration = secs
+                    if (autoPlay) {
+                        claimPlayer(prepared)
+                        prepared.start()
+                        isPlaying = true
+                        showElapsed = true
+                    }
+                }
+                mediaPlayer.setOnCompletionListener {
+                    isPlaying = false
+                    currentTime = 0f
+                    showElapsed = false
+                    runCatching { it.seekTo(0) }
+                    releaseClaim(it)
+                }
+                mediaPlayer.setOnErrorListener { _, _, _ ->
+                    isLoading = false
+                    loadError = true
+                    isPlaying = false
+                    true
+                }
+                mediaPlayer.prepareAsync()
+            }.onFailure {
+                isLoading = false
+                loadError = true
+                mediaPlayer.release()
+                player = null
+            }
         }
     }
 
@@ -206,6 +225,7 @@ fun VoiceMessagePlayer(
 
     DisposableEffect(audioUrl, localFile) {
         onDispose {
+            resolveJob?.cancel()
             val p = player
             releaseClaim(p)
             runCatching {

@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -51,9 +50,17 @@ import com.example.spectroom.ui.theme.TabSelected
 private const val SOMETHING_ELSE_MIN_CHARS = 20
 private const val SOMETHING_ELSE_MAX_CHARS = 200
 
+enum class ReportReasonHeaderStyle {
+    /** Red title: "Report Evya" */
+    REPORT_ONLY,
+    /** Red title: "Evya has been blocked!" */
+    BLOCKED,
+}
+
 @Composable
 fun ReportReasonOverlay(
     firstName: String,
+    headerStyle: ReportReasonHeaderStyle = ReportReasonHeaderStyle.BLOCKED,
     onCancel: () -> Unit,
     onSubmit: (ProfileReportReason, String?) -> Unit,
 ) {
@@ -104,7 +111,12 @@ fun ReportReasonOverlay(
                     .padding(20.dp),
             ) {
                 Text(
-                    text = stringResource(R.string.profile_report_blocked_notice, firstName),
+                    text = when (headerStyle) {
+                        ReportReasonHeaderStyle.BLOCKED ->
+                            stringResource(R.string.profile_report_blocked_notice, firstName)
+                        ReportReasonHeaderStyle.REPORT_ONLY ->
+                            stringResource(R.string.profile_report_notice, firstName)
+                    },
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 18.sp,
                     color = LikeRed,
@@ -159,7 +171,13 @@ fun ReportReasonOverlay(
                             .clip(RoundedCornerShape(12.dp))
                             .background(colors.background)
                             .border(1.dp, colors.secondaryText.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
-                            .clickable { showBlockedNotReported = true }
+                            .clickable {
+                                if (headerStyle == ReportReasonHeaderStyle.BLOCKED) {
+                                    showBlockedNotReported = true
+                                } else {
+                                    onCancel()
+                                }
+                            }
                             .padding(vertical = 14.dp),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -206,13 +224,14 @@ fun ReportReasonOverlay(
 
 @Composable
 fun ReportThankYouOverlay(
+    didBlock: Boolean = false,
     onDismiss: () -> Unit,
 ) {
     val colors = LocalSpectRoomColors.current
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.8f))
+            .background(Color.Black.copy(alpha = 0.35f))
             .zIndex(35f)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -231,36 +250,56 @@ fun ReportThankYouOverlay(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                     onClick = {},
-                )
-                .padding(horizontal = 20.dp, vertical = 24.dp),
+                ),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(
-                text = stringResource(R.string.profile_report_thank_you),
-                fontWeight = FontWeight.Bold,
-                fontSize = 17.sp,
-                color = colors.text,
-                textAlign = TextAlign.Center,
-            )
-            Spacer(modifier = Modifier.height(20.dp))
-            Box(
+            Column(
                 modifier = Modifier
-                    .widthIn(min = 140.dp, max = 200.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(TabSelected.copy(alpha = 0.1f))
-                    .border(1.dp, TabSelected.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
-                    .clickable(onClick = onDismiss)
-                    .padding(horizontal = 24.dp, vertical = 14.dp),
-                contentAlignment = Alignment.Center,
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(top = 20.dp, bottom = 18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
+                Icon(
+                    imageVector = Icons.Filled.CheckCircle,
+                    contentDescription = null,
+                    tint = Color(0xFF34C759),
+                    modifier = Modifier.size(36.dp),
+                )
+                Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = stringResource(R.string.common_ok),
-                    color = TabSelected,
+                    text = stringResource(R.string.profile_report_submitted_title),
                     fontWeight = FontWeight.SemiBold,
-                    fontSize = 15.sp,
+                    fontSize = 17.sp,
+                    color = colors.text,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = stringResource(
+                        if (didBlock) {
+                            R.string.profile_report_submitted_body_blocked
+                        } else {
+                            R.string.profile_report_submitted_body
+                        },
+                    ),
+                    fontSize = 14.sp,
+                    color = colors.secondaryText,
                     textAlign = TextAlign.Center,
                 )
             }
+            HorizontalDivider(color = colors.secondaryText.copy(alpha = 0.2f))
+            Text(
+                text = stringResource(R.string.common_got_it),
+                color = Color(0xFF34C759),
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onDismiss)
+                    .padding(vertical = 14.dp),
+            )
         }
     }
 }
