@@ -1014,7 +1014,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun submitSupportTicket(topic: SupportTopic, message: String) {
+    fun submitSupportTicket(topic: SupportTopic, message: String, imageUri: Uri? = null) {
         val user = _uiState.value.currentUser
         viewModelScope.launch {
             _isSendingSupport.value = true
@@ -1025,6 +1025,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 if (uid.isNullOrBlank()) {
                     error("Sign in to send a support message, or email spectroom.support@gmail.com")
                 }
+                val imageURL = imageUri?.let { photoStorageRepository.uploadSupportImage(it) }
                 moderationRepository.submitSupportTicket(
                     topicLabel = "${topic.subjectPrefix} $label",
                     message = message,
@@ -1032,6 +1033,7 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                     userEmail = user?.email.orEmpty().ifBlank {
                         authRepository.currentEmail.orEmpty()
                     },
+                    imageURL = imageURL,
                 )
             }.onSuccess {
                 _isSendingSupport.value = false
@@ -1040,7 +1042,12 @@ class AppStateViewModel(application: Application) : AndroidViewModel(application
                 hideHelpSupport()
             }.onFailure { error ->
                 _isSendingSupport.value = false
-                _supportError.value = error.message ?: "Could not send message"
+                val messageText = error.message.orEmpty()
+                _supportError.value = when {
+                    messageText.contains("too large", ignoreCase = true) ->
+                        getApplication<Application>().getString(R.string.messages_image_error_size)
+                    else -> messageText.ifBlank { "Could not send message" }
+                }
             }
         }
     }

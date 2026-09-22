@@ -48,6 +48,19 @@ class PhotoStorageRepository(
         )
     }
 
+    /** Optional Help & Support attachment (≤5MB, JPG/PNG/HEIC → JPEG). */
+    suspend fun uploadSupportImage(uri: Uri): String {
+        when (ChatImageLimits.validateOriginal(context, uri)) {
+            ChatImageLimits.ValidationResult.TooLarge -> error("Image too large")
+            else -> Unit
+        }
+        val uid = auth.currentUser?.uid ?: error("Not signed in")
+        return uploadJpeg(
+            uri = uri,
+            path = "support_images/support_${uid}_${UUID.randomUUID()}.jpg",
+        )
+    }
+
     data class UploadedChatVideo(
         val videoURL: String,
         val thumbnailURL: String,

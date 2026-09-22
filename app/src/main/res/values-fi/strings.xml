@@ -209,6 +209,11 @@ Voit käyttää SpectRoomia uudelleen.</string>
     <string name="support_message_min_chars">Vähintään 20 merkkiä</string>
     <string name="support_button_send">Lähetä Viesti</string>
     <string name="support_button_sent">Viesti lähetetty</string>
+    <string name="support_attachment_label">Kuva (valinnainen)</string>
+    <string name="support_attachment_add">Lisää kuva galleriasta</string>
+    <string name="support_attachment_added">Kuva liitetty</string>
+    <string name="support_attachment_remove">Poista kuva</string>
+    <string name="support_attachment_hint">Max 5 Mt, JPG, PNG tai HEIC.</string>
     <string name="support_or">TAI</string>
     <string name="support_email_label">Tuen sähköposti</string>
     <string name="admin_section_title">Admin</string>

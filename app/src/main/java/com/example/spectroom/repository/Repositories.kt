@@ -2167,6 +2167,7 @@ class ModerationRepository(
         message: String,
         userName: String,
         userEmail: String,
+        imageURL: String? = null,
     ): String {
         val uid = auth.currentUser?.uid ?: "unknown"
         val ticketId = makeSupportTicketId()
@@ -2180,6 +2181,10 @@ class ModerationRepository(
             "status" to "new",
             "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
         )
+        if (!imageURL.isNullOrBlank()) {
+            data["imageURL"] = imageURL
+            data["hasAttachment"] = true
+        }
         db.collection("supportMessages").add(data).await()
         return ticketId
     }

@@ -209,6 +209,11 @@ Fullur aðgangur verður sjálfkrafa endurheimtur á %2$s.</string>
     <string name="support_message_min_chars">Lágmark 20 stafir</string>
     <string name="support_button_send">Sendu skilaboð</string>
     <string name="support_button_sent">Skilaboð send</string>
+    <string name="support_attachment_label">Mynd (valfrjálst)</string>
+    <string name="support_attachment_add">Bæta við mynd úr safni</string>
+    <string name="support_attachment_added">Mynd meðfylgjandi</string>
+    <string name="support_attachment_remove">Fjarlægja mynd</string>
+    <string name="support_attachment_hint">Hámark 5 MB, JPG, PNG eða HEIC.</string>
     <string name="support_or">EÐA</string>
     <string name="support_email_label">Stuðningspóstur</string>
     <string name="admin_section_title">Admin</string>

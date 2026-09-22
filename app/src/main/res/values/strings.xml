@@ -539,6 +539,11 @@ You can use SpectRoom again.</string>
     <string name="support_message_min_chars">Min 20 characters</string>
     <string name="support_button_send">Send Message</string>
     <string name="support_button_sent">Message Sent</string>
+    <string name="support_attachment_label">Photo (optional)</string>
+    <string name="support_attachment_add">Add photo from gallery</string>
+    <string name="support_attachment_added">Photo attached</string>
+    <string name="support_attachment_remove">Remove photo</string>
+    <string name="support_attachment_hint">Max 5MB, JPG, PNG or HEIC.</string>
     <string name="support_or">OR</string>
     <string name="support_email_label">Support Email</string>
 

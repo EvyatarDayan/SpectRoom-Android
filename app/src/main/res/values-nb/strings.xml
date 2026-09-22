@@ -209,6 +209,11 @@ Du kan bruke SpectRoom igjen.</string>
     <string name="support_message_min_chars">Minst 20 tegn</string>
     <string name="support_button_send">Send melding</string>
     <string name="support_button_sent">Melding sendt</string>
+    <string name="support_attachment_label">Bilde (valgfritt)</string>
+    <string name="support_attachment_add">Legg til bilde fra galleriet</string>
+    <string name="support_attachment_added">Bilde vedlagt</string>
+    <string name="support_attachment_remove">Fjern bilde</string>
+    <string name="support_attachment_hint">Maks 5 MB, JPG, PNG eller HEIC.</string>
     <string name="support_or">ELLER</string>
     <string name="support_email_label">E-post til støtte</string>
     <string name="admin_section_title">Admin</string>

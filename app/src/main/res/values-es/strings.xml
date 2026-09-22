@@ -209,6 +209,11 @@ Ya puedes usar SpectRoom de nuevo.</string>
     <string name="support_message_min_chars">Mín. 20 caracteres</string>
     <string name="support_button_send">Enviar mensaje</string>
     <string name="support_button_sent">Mensaje enviado</string>
+    <string name="support_attachment_label">Foto (opcional)</string>
+    <string name="support_attachment_add">Añadir foto de la galería</string>
+    <string name="support_attachment_added">Foto adjuntada</string>
+    <string name="support_attachment_remove">Quitar foto</string>
+    <string name="support_attachment_hint">Máx. 5 MB, JPG, PNG o HEIC.</string>
     <string name="support_or">O</string>
     <string name="support_email_label">Correo de soporte</string>
     <string name="admin_section_title">Admin</string>
